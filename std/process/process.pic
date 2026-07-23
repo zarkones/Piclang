@@ -81,7 +81,7 @@ type FnCreateFileA = fn(*u8, u32, u32, PVOID, u32, u32, Handle) -> Handle
 struct Cmd {
     // --- config (set before Start) ---
     program: *u8       // executable path (required unless Shell helpers)
-    argv: **u8      // null-terminated argv; null → [path, null]
+    argv: **u8      // null-terminated argv; null -> [path, null]
     dir: *u8        // working directory; null = inherit
     env: **u8       // null-terminated envp (KEY=VAL); null = inherit
     stdinMode: u64
@@ -359,7 +359,7 @@ fn makePipeLinux(r: *Handle, w: *Handle) -> *u8 {
     return 0
 }
 
-// SECURITY_ATTRIBUTES: nLength@0, lpSecurityDescriptor@8, bInheritHandle@16 → size 24
+// SECURITY_ATTRIBUTES: nLength@0, lpSecurityDescriptor@8, bInheritHandle@16 -> size 24
 fn makePipeWindows(r: *Handle, w: *Handle) -> *u8 {
     var sa: [24]u8
     var i: u64 = 0

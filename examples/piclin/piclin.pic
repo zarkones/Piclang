@@ -5,14 +5,14 @@
 //
 // Flow (ELF analogue of PEB walk):
 //   1. Entry passes stack frame as stackHint (return addr at [hint+8])
-//   2. Page-walk from loader retaddr → ELF header of main / ld.so
-//   3. PT_DYNAMIC / DT_DEBUG → rDebug → linkMap list
+//   2. Page-walk from loader retaddr -> ELF header of main / ld.so
+//   3. PT_DYNAMIC / DT_DEBUG -> rDebug -> linkMap list
 //   4. Match libc by djb2 hash of basename ("libc.so.6")
 //   5. Dynsym scan for open/write/close/exit by hash
 //   6. open("test.txt") / write("success") / close / exit
 //
 // Build:  picc examples/piclin/piclin.pic -o examples/piclin/piclin.bin -S
-// Run:    map RWX + call (harness), then cat test.txt → "success"
+// Run:    map RWX + call (harness), then cat test.txt -> "success"
 //
 // Libc is invoked with __sysv_call (System V AMD64), not the default MS x64
 // convention used for Piclang-internal calls.

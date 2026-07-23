@@ -1,0 +1,136 @@
+// Package c2 - implant identity helpers.
+package c2
+
+import "std/runtime"
+import "std/os"
+import "std/hash"
+import "std/crypto"
+import "std/strings"
+
+// appendPart appends "|part" onto acc (or copies part if acc is null).
+// Consumes acc (frees it). Does not free part.
+fn appendPart(acc: *u8, part: *u8) -> (*u8, *u8) {
+    var p: *u8 = part
+    if p == null {
+        p = ""
+    }
+    if acc == null {
+        return strings.Append(p, "")
+    }
+    mid, err := strings.Append(acc, "|")
+    runtime.Free(acc)
+    if err != 0 {
+        return null, err
+    }
+    defer runtime.Free(mid)
+    return strings.Append(mid, p)
+}
+
+// u64Dec writes v as decimal into buf (max 20 digits + NUL). Returns length.
+fn u64Dec(buf: *u8, v: u64) -> u64 {
+    if v == 0 {
+        *buf = 48
+        *(buf + 1) = 0
+        return 1
+    }
+    var tmp: [20]u8
+    var n: u64 = 0
+    var x: u64 = v
+    while x > 0 {
+        tmp[n] = cast[u8](48 + x % 10)
+        n = n + 1
+        x = x / 10
+    }
+    var i: u64 = 0
+    while i < n {
+        *(buf + i) = tmp[n - 1 - i]
+        i = i + 1
+    }
+    *(buf + n) = 0
+    return n
+}
+
+// GetAgentID builds a stable agent fingerprint from host/machine details,
+// SHA-1 hashes it, and returns a heap hex string (40 chars + NUL).
+// Caller runtime.Free's the result.
+//
+// Material: hostname|username|cpumodel|os|arch|ncpu|ram
+fn GetAgentID() -> (*u8, *u8) {
+    host, err := os.Hostname()
+    if err != 0 {
+        return null, err
+    }
+    defer runtime.Free(host)
+
+    user, err2 := os.Username()
+    if err2 != 0 {
+        return null, err2
+    }
+    defer runtime.Free(user)
+
+    cpu, err3 := os.CPUModel()
+    if err3 != 0 {
+        return null, err3
+    }
+    defer runtime.Free(cpu)
+
+    ncpu, err4 := os.NumCPU()
+    if err4 != 0 {
+        return null, err4
+    }
+    ram, err5 := os.TotalRAM()
+    if err5 != 0 {
+        return null, err5
+    }
+
+    var osName: *u8 = os.OSName()
+    var arch: *u8 = os.Arch()
+
+    var nbuf: [24]u8
+    var rbuf: [24]u8
+    u64Dec(&nbuf[0], ncpu)
+    u64Dec(&rbuf[0], ram)
+
+    acc, err6 := appendPart(null, host)
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, user)
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, cpu)
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, osName)
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, arch)
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, &nbuf[0])
+    if err6 != 0 {
+        return null, err6
+    }
+    acc, err6 = appendPart(acc, &rbuf[0])
+    if err6 != 0 {
+        return null, err6
+    }
+    // Register after final assign: defer captures the pointer at this point.
+    defer runtime.Free(acc)
+
+    var dig: [20]u8
+    var herr: *u8 = hash.SHA1(acc, __strlen(acc), &dig[0])
+    if herr != 0 {
+        return null, herr
+    }
+
+    hex, herr2 := crypto.HexEncode(&dig[0], hash.SHA1_SIZE)
+    if herr2 != 0 {
+        return null, herr2
+    }
+    return hex, 0
+}

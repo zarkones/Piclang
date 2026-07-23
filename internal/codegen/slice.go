@@ -34,7 +34,7 @@ func (g *Gen) loadSliceLocal(off int32) {
 }
 
 func (g *Gen) pushSliceHeader() {
-	// push order: ptr, len, cap → top = cap
+	// push order: ptr, len, cap -> top = cap
 	g.buf.Push(encode.RAX)
 	g.buf.Push(encode.RDX)
 	g.buf.Push(encode.R8)
@@ -47,7 +47,7 @@ func (g *Gen) popSliceHeader() {
 }
 
 func (g *Gen) emitRuntimeAlloc() {
-	// size in RAX → ptr in RAX
+	// size in RAX -> ptr in RAX
 	g.buf.MovRR(encode.RCX, encode.RAX)
 	g.buf.SubRI(encode.RSP, 0x20)
 	at := g.buf.CallRel32()
@@ -161,7 +161,7 @@ func (g *Gen) emitCap(e *ast.CapExpr) {
 
 func (g *Gen) emitFreeSlice(e *ast.FreeExpr) {
 	g.emitExpr(e.X)
-	// if (cap_field & OWN) && ptr != null → Free(ptr)
+	// if (cap_field & OWN) && ptr != null -> Free(ptr)
 	g.buf.MovRR(encode.R11, encode.R8)
 	g.buf.MovRI(encode.R9, types.SliceOwnBit)
 	g.buf.AndRR(encode.R11, encode.R9)
@@ -316,7 +316,7 @@ func (g *Gen) emitAppend(e *ast.AppendExpr) {
 	g.buf.PatchRel32(jFit, g.buf.Len())
 	// rcx = new_cap
 
-	// if new_cap == old_cap && ptr != 0 → in-place
+	// if new_cap == old_cap && ptr != 0 -> in-place
 	g.buf.CmpRR(encode.RCX, encode.R9)
 	jGrow := g.buf.JccRel32(encode.CC_NE)
 	g.buf.TestRR(encode.RSI, encode.RSI)

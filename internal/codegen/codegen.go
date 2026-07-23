@@ -55,7 +55,7 @@ type Result struct {
 	EndOff     int
 	Size       int
 	MapSymbols map[string]int
-	// SectionNames maps logical role → emitted name (e.g. "rdata" → ".k9m2xq").
+	// SectionNames maps logical role -> emitted name (e.g. "rdata" -> ".k9m2xq").
 	SectionNames map[string]string
 	// SeedUsed is the PRNG seed applied when RandSections was on (0 if off).
 	SeedUsed int64
@@ -243,7 +243,7 @@ func GenerateWith(chk *sema.Checker, opts Options) (*Result, error) {
 	if opts.RandSections {
 		g.rng, seedUsed = newRNG(opts.Seed)
 		used := map[string]bool{}
-		// Logical roles → random section-style names (not fixed .text/.rdata/.global).
+		// Logical roles -> random section-style names (not fixed .text/.rdata/.global).
 		g.secNames["entry"] = randomSectionName(g.rng, used)
 		g.secNames["text"] = randomSectionName(g.rng, used)
 		g.secNames["rdata"] = randomSectionName(g.rng, used)
@@ -1656,7 +1656,7 @@ func (g *Gen) finishMSCallFrame(n int) int32 {
 	}
 	g.buf.SubRI(encode.RSP, frame)
 	// arg[4+i] was at old_rsp + 8*(n-1-(4+i)) = old_rsp + 8*(n-5-i)
-	// old_rsp = new_rsp + frame → offset frame + 8*(n-5-i)
+	// old_rsp = new_rsp + frame -> offset frame + 8*(n-5-i)
 	for i := 0; i < rem; i++ {
 		oldOff := frame + int32(8*(n-5-i))
 		g.buf.MovRMDisp(encode.RAX, encode.RSP, oldOff)
@@ -1773,7 +1773,7 @@ func (g *Gen) emitBuiltin(name string, args []ast.Expr) {
 	}
 }
 
-// emitStrUnlock emits str-unlock helper (rcx=entry, rdx=len) → rax=cstr.
+// emitStrUnlock emits str-unlock helper (rcx=entry, rdx=len) -> rax=cstr.
 //
 // Entry layout: [u8 ready][u8 enc[len]...]
 // ready==0: XOR-decrypt enc in place with strKeystream, set ready=1.

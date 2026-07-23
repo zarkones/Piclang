@@ -146,7 +146,7 @@ func (p *Parser) parseImportSpec() *ast.ImportSpec {
 }
 
 func importDefaultAlias(path string) string {
-	// last path element: "lib/pe" → "pe"
+	// last path element: "lib/pe" -> "pe"
 	for i := len(path) - 1; i >= 0; i-- {
 		if path[i] == '/' {
 			return path[i+1:]

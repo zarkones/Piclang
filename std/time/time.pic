@@ -22,7 +22,7 @@ const CLOCK_MONOTONIC: u64 = 1
 const SYS_NANOSLEEP: u64 = 35
 const SYS_CLOCK_GETTIME: u64 = 228
 
-// Windows FILETIME → Unix: 100ns intervals; epoch delta
+// Windows FILETIME -> Unix: 100ns intervals; epoch delta
 const FILETIME_UNIX_DELTA: u64 = 116444736000000000
 
 type FnSleep = fn(u32) -> void
@@ -168,7 +168,7 @@ fn Now() -> (i64, *u8) {
         if ticks < FILETIME_UNIX_DELTA {
             return 0, "time: clock failed"
         }
-        // 100ns units → ns
+        // 100ns units -> ns
         var unix100: u64 = ticks - FILETIME_UNIX_DELTA
         return cast[i64](unix100 * 100), 0
     }

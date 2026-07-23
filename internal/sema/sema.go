@@ -96,7 +96,7 @@ type Checker struct {
 	SelObj map[*ast.SelectorExpr]*Object
 
 	// codegen view (link names)
-	Funcs   map[string]*Object // LinkName → obj
+	Funcs   map[string]*Object // LinkName -> obj
 	Globals []*Object
 	Strings []StringLit
 	// emission order

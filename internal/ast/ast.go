@@ -19,7 +19,7 @@ func (f *File) Pos() (int, int) { return 1, 1 }
 
 // ImportSpec is a single import: import "path" or import alias "path".
 type ImportSpec struct {
-	Alias     string // empty → last path element
+	Alias     string // empty -> last path element
 	Path      string // import path, e.g. "resolve" or "lib/pe"
 	Line, Col int
 }
@@ -331,7 +331,7 @@ func (e *SliceExpr) exprNode()       {}
 type MakeExpr struct {
 	Type      TypeExpr
 	Len       Expr
-	Cap       Expr // nil → cap = len
+	Cap       Expr // nil -> cap = len
 	Line, Col int
 }
 
