@@ -27,7 +27,7 @@ fn main(stack_hint: *void) -> u64 {
     if err != 0 {
         return 0x200
     }
-    defer strings.Free(c)
+    defer runtime.Free(c)
 
     if !strings.HasPrefix(c, "Hello") {
         return 0x201
@@ -43,7 +43,7 @@ fn main(stack_hint: *void) -> u64 {
     if err2 != 0 {
         return 0x300
     }
-    defer strings.Free(d)
+    defer runtime.Free(d)
     if !strings.Compare(d, "Hello, World") {
         return 0x301
     }

@@ -254,11 +254,7 @@ fn ParseIP(s: *u8) -> (u32, *u8) {
     return ip, 0
 }
 
-fn FreeStr(p: *u8) {
-    runtime.Free(cast[*void](p))
-}
-
-// IPToString formats presentation-order IP as "a.b.c.d". Caller FreeStr.
+// IPToString formats presentation-order IP as "a.b.c.d". Caller runtime.Free.
 fn IPToString(ip: u32) -> (*u8, *u8) {
     var a: u64 = cast[u64]((ip >> 24) & 0xFF)
     var b: u64 = cast[u64]((ip >> 16) & 0xFF)

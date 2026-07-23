@@ -118,7 +118,7 @@ fn Contains(s: *u8, sub: *u8) -> bool {
     return false
 }
 
-// Append returns a new heap string a+b. Caller must Free the result.
+// Append returns a new heap string a+b. Caller must runtime.Free the result.
 // On success: (s, 0). On failure: (null, error).
 fn Append(a: *u8, b: *u8) -> (*u8, *u8) {
     var na: u64 = Len(a)
@@ -305,9 +305,4 @@ fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
     }
     *(out + di) = 0
     return out, 0
-}
-
-// Free releases a string returned by Append/Replace/ReplaceAll.
-fn Free(s: *u8) {
-    runtime.Free(cast[*void](s))
 }

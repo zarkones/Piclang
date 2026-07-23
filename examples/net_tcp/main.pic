@@ -31,7 +31,7 @@ fn main(stack_hint: *void) -> u64 {
     if err2 != 0 {
         return 5
     }
-    net.FreeStr(s)
+    runtime.Free(s)
 
     // Optional live echo on 127.0.0.1:19876
     c, err3 := net.Dial("127.0.0.1", 19876)

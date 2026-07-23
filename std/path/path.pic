@@ -1,5 +1,5 @@
 // Package path - dual-OS path helpers for *u8 C strings (Go path/filepath-lite).
-// Allocating functions return heap strings; caller runtime.Free / path.Free.
+// Allocating functions return heap strings; caller runtime.Free.
 // Requires runtime.Init for Windows separator detection (defaults to '/').
 package path
 
@@ -7,10 +7,6 @@ import "std/runtime"
 import "std/mem"
 
 const MAX_PATH: u64 = 4096
-
-fn Free(p: *u8) {
-    runtime.Free(cast[*void](p))
-}
 
 // Separator returns '/' or '\\' based on runtime OS (default '/').
 fn Separator() -> u8 {
@@ -182,7 +178,7 @@ fn Ext(p: *u8) -> (*u8, *u8) {
         if c == 46 {
             var out: *u8
             out, err = alloc_copy(base + i - 1, n - (i - 1))
-            Free(base)
+            runtime.Free(cast[*void](base))
             return out, err
         }
         if is_sep(c) {
@@ -190,7 +186,7 @@ fn Ext(p: *u8) -> (*u8, *u8) {
         }
         i = i - 1
     }
-    Free(base)
+    runtime.Free(cast[*void](base))
     return alloc_copy(cast[*u8](null), 0)
 }
 

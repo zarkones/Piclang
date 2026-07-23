@@ -469,12 +469,12 @@ fn main(stack_hint: *void) -> u64 {
     if !runtime.Init(stack_hint) { return 1 }
     s, err := strings.Append("foo", "bar")
     if err != 0 { return 2 }
-    if !strings.Compare(s, "foobar") { strings.Free(s); return 3 }
+    if !strings.Compare(s, "foobar") { runtime.Free(s); return 3 }
     t, err2 := strings.ReplaceAll(s, "foo", "baz")
-    strings.Free(s)
+    runtime.Free(s)
     if err2 != 0 { return 4 }
-    if !strings.Compare(t, "bazbar") { strings.Free(t); return 5 }
-    strings.Free(t)
+    if !strings.Compare(t, "bazbar") { runtime.Free(t); return 5 }
+    runtime.Free(t)
     return 0
 }
 `
@@ -649,10 +649,10 @@ fn main(stack_hint: *void) -> u64 {
     h, err := crypto.HexEncode(&b[0], 2)
     if err != 0 { return 4 }
     p, n, err2 := crypto.HexDecode(h)
-    crypto.Free(h)
+    runtime.Free(h)
     if err2 != 0 { return 5 }
-    if n != 2 { crypto.Free(p); return 6 }
-    crypto.Free(p)
+    if n != 2 { runtime.Free(p); return 6 }
+    runtime.Free(p)
     return 0
 }
 `
@@ -671,10 +671,10 @@ fn main(stack_hint: *void) -> u64 {
     j, err := path.Join("/tmp", "x")
     if err != 0 { return 2 }
     b, err2 := path.Base(j)
-    if err2 != 0 { path.Free(j); return 3 }
-    if __strlen(b) != 1 { path.Free(j); path.Free(b); return 4 }
-    path.Free(b)
-    path.Free(j)
+    if err2 != 0 { runtime.Free(j); return 3 }
+    if __strlen(b) != 1 { runtime.Free(j); runtime.Free(b); return 4 }
+    runtime.Free(b)
+    runtime.Free(j)
     return 0
 }
 `
@@ -712,8 +712,8 @@ fn main(stack_hint: *void) -> u64 {
     if env.Set("PICLANG_CGO_ENV", "z") != 0 { return 2 }
     v, err := env.Get("PICLANG_CGO_ENV")
     if err != 0 { return 3 }
-    if __strlen(v) != 1 { env.Free(v); return 4 }
-    env.Free(v)
+    if __strlen(v) != 1 { runtime.Free(v); return 4 }
+    runtime.Free(v)
     if env.Unset("PICLANG_CGO_ENV") != 0 { return 5 }
     return 0
 }
@@ -751,8 +751,8 @@ fn main(stack_hint: *void) -> u64 {
     if ip != 0x7F000001 { return 4 }
     s, err2 := net.IPToString(ip)
     if err2 != 0 { return 5 }
-    if __strlen(s) != 9 { net.FreeStr(s); return 6 }
-    net.FreeStr(s)
+    if __strlen(s) != 9 { runtime.Free(s); return 6 }
+    runtime.Free(s)
     return 0
 }
 `

@@ -46,7 +46,7 @@ fn main(stack_hint: *void) -> u64 {
     if err != 0 {
         return 12
     }
-    crypto.Free(hx)
+    runtime.Free(hx)
 
     // --- path ---
     j, err2 := path.Join("/var", "log")
@@ -55,16 +55,16 @@ fn main(stack_hint: *void) -> u64 {
     }
     b, err3 := path.Base(j)
     if err3 != 0 {
-        path.Free(j)
+        runtime.Free(j)
         return 21
     }
     if __strlen(b) != 3 {
-        path.Free(j)
-        path.Free(b)
+        runtime.Free(j)
+        runtime.Free(b)
         return 22
     }
-    path.Free(b)
-    path.Free(j)
+    runtime.Free(b)
+    runtime.Free(j)
     if !path.IsAbs("/etc/hosts") {
         return 23
     }
@@ -97,10 +97,10 @@ fn main(stack_hint: *void) -> u64 {
         return 41
     }
     if __strlen(v) != 2 {
-        env.Free(v)
+        runtime.Free(v)
         return 42
     }
-    env.Free(v)
+    runtime.Free(v)
     env.Unset("PICLANG_STDLIB_MORE")
 
     return 0

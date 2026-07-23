@@ -146,7 +146,7 @@ fn from_hex_digit(c: u8) -> i64 {
     return -1
 }
 
-// HexEncode returns a new heap hex string (2*n chars + NUL). Caller Free.
+// HexEncode returns a new heap hex string (2*n chars + NUL). Caller runtime.Free.
 fn HexEncode(data: *u8, n: u64) -> (*u8, *u8) {
     if data == null && n > 0 {
         return null, "crypto: null data"
@@ -169,7 +169,7 @@ fn HexEncode(data: *u8, n: u64) -> (*u8, *u8) {
     return out, 0
 }
 
-// HexDecode decodes a hex C string into a new heap buffer. Caller Free.
+// HexDecode decodes a hex C string into a new heap buffer. Caller runtime.Free.
 // Returns (ptr, len, err) - len via out_len pointer to keep ABI simple:
 // actually return (*u8, *u8) and encode length in first... use (ptr, err) + out param.
 // Multi-return: (*u8, u64, *u8) = 3 cells - OK.
@@ -215,9 +215,4 @@ fn HexDecode(hex: *u8) -> (*u8, u64, *u8) {
         i = i + 1
     }
     return out, out_n, 0
-}
-
-// Free is an alias for runtime.Free for buffers from HexEncode/HexDecode.
-fn Free(p: *u8) {
-    runtime.Free(cast[*void](p))
 }
