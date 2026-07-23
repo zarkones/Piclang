@@ -1,0 +1,207 @@
+// Base64 (RFC 4648 standard alphabet) - freestanding.
+package crypto
+
+import "std/runtime"
+
+// alphabet: A-Z a-z 0-9 + /
+fn b64EncDigit(v: u64) -> u8 {
+    if v < 26 {
+        return cast[u8](65 + v) // A
+    }
+    if v < 52 {
+        return cast[u8](97 + (v - 26)) // a
+    }
+    if v < 62 {
+        return cast[u8](48 + (v - 52)) // 0
+    }
+    if v == 62 {
+        return 43 // +
+    }
+    return 47 // /
+}
+
+fn b64DecDigit(c: u8) -> i64 {
+    if c >= 65 {
+        if c <= 90 {
+            return cast[i64](c - 65)
+        }
+    }
+    if c >= 97 {
+        if c <= 122 {
+            return cast[i64](c - 97 + 26)
+        }
+    }
+    if c >= 48 {
+        if c <= 57 {
+            return cast[i64](c - 48 + 52)
+        }
+    }
+    if c == 43 {
+        return 62
+    }
+    if c == 47 {
+        return 63
+    }
+    return -1
+}
+
+// Base64Encode encodes n bytes to a heap NUL-terminated C string. Caller runtime.Free.
+fn Base64Encode(data: *u8, n: u64) -> (*u8, *u8) {
+    if data == null && n > 0 {
+        return null, "crypto: null data"
+    }
+    var outN: u64 = ((n + 2) / 3) * 4
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(outN + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var i: u64 = 0
+    var o: u64 = 0
+    while i + 3 <= n {
+        var n0: u64 = cast[u64](*(data + i))
+        var n1: u64 = cast[u64](*(data + i + 1))
+        var n2: u64 = cast[u64](*(data + i + 2))
+        var v: u64 = (n0 << 16) | (n1 << 8) | n2
+        *(out + o) = b64EncDigit((v >> 18) & 63)
+        *(out + o + 1) = b64EncDigit((v >> 12) & 63)
+        *(out + o + 2) = b64EncDigit((v >> 6) & 63)
+        *(out + o + 3) = b64EncDigit(v & 63)
+        i = i + 3
+        o = o + 4
+    }
+    var rem: u64 = n - i
+    if rem == 1 {
+        var n0b: u64 = cast[u64](*(data + i))
+        var v1: u64 = n0b << 16
+        *(out + o) = b64EncDigit((v1 >> 18) & 63)
+        *(out + o + 1) = b64EncDigit((v1 >> 12) & 63)
+        *(out + o + 2) = 61 // =
+        *(out + o + 3) = 61
+        o = o + 4
+    } else {
+        if rem == 2 {
+            var n0c: u64 = cast[u64](*(data + i))
+            var n1c: u64 = cast[u64](*(data + i + 1))
+            var v2: u64 = (n0c << 16) | (n1c << 8)
+            *(out + o) = b64EncDigit((v2 >> 18) & 63)
+            *(out + o + 1) = b64EncDigit((v2 >> 12) & 63)
+            *(out + o + 2) = b64EncDigit((v2 >> 6) & 63)
+            *(out + o + 3) = 61
+            o = o + 4
+        }
+    }
+    *(out + o) = 0
+    return out, 0
+}
+
+// Base64Decode decodes a NUL-terminated Base64 string into a heap buffer.
+// Ignores ASCII whitespace. Returns (ptr, len, err). Caller runtime.Free.
+fn Base64Decode(s: *u8) -> (*u8, u64, *u8) {
+    if s == null {
+        return null, 0, "crypto: null base64"
+    }
+    // count payload chars (ignore whitespace)
+    var n: u64 = 0
+    var i: u64 = 0
+    while *(s + i) != 0 {
+        var c: u8 = *(s + i)
+        if c != 32 {
+            if c != 9 {
+                if c != 10 {
+                    if c != 13 {
+                        n = n + 1
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    if n == 0 {
+        var empty: *void
+        var err0: *u8
+        empty, err0 = runtime.Alloc(1)
+        if err0 != 0 {
+            return null, 0, err0
+        }
+        *cast[*u8](empty) = 0
+        return cast[*u8](empty), 0, 0
+    }
+    if (n & 3) != 0 {
+        return null, 0, "crypto: bad base64 length"
+    }
+    var outMax: u64 = (n / 4) * 3
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(outMax + 1)
+    if err != 0 {
+        return null, 0, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var o: u64 = 0
+    var vals: [4]i64
+    var vi: u64 = 0
+    i = 0
+    while *(s + i) != 0 {
+        var ch: u8 = *(s + i)
+        i = i + 1
+        if ch == 32 {
+            continue
+        }
+        if ch == 9 {
+            continue
+        }
+        if ch == 10 {
+            continue
+        }
+        if ch == 13 {
+            continue
+        }
+        if ch == 61 {
+            // padding
+            vals[vi] = -2
+            vi = vi + 1
+        } else {
+            var d: i64 = b64DecDigit(ch)
+            if d < 0 {
+                runtime.Free(raw)
+                return null, 0, "crypto: bad base64"
+            }
+            vals[vi] = d
+            vi = vi + 1
+        }
+        if vi == 4 {
+            if vals[0] < 0 {
+                runtime.Free(raw)
+                return null, 0, "crypto: bad base64"
+            }
+            if vals[1] < 0 {
+                runtime.Free(raw)
+                return null, 0, "crypto: bad base64"
+            }
+            var b0: u64 = cast[u64](vals[0])
+            var b1: u64 = cast[u64](vals[1])
+            *(out + o) = cast[u8]((b0 << 2) | (b1 >> 4))
+            o = o + 1
+            if vals[2] >= 0 {
+                var b2: u64 = cast[u64](vals[2])
+                *(out + o) = cast[u8](((b1 & 15) << 4) | (b2 >> 2))
+                o = o + 1
+                if vals[3] >= 0 {
+                    var b3: u64 = cast[u64](vals[3])
+                    *(out + o) = cast[u8](((b2 & 3) << 6) | b3)
+                    o = o + 1
+                }
+            }
+            vi = 0
+        }
+    }
+    if vi != 0 {
+        runtime.Free(raw)
+        return null, 0, "crypto: bad base64"
+    }
+    *(out + o) = 0
+    return out, o, 0
+}

