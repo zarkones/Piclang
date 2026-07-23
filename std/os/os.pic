@@ -1,7 +1,8 @@
-// Package os - dual-OS host and process path helpers.
+// Package os - dual-OS host, process path, and machine details.
 //
-// Requires runtime.Init first. Fallible APIs return (heap *u8, *u8) where
-// err == 0 means success. Caller runtime.Free's the string.
+// Requires runtime.Init first. Fallible APIs return (value, *u8) where
+// err == 0 means success. Heap strings: caller runtime.Free.
+// Static strings (OSName, Arch): do not Free.
 package os
 
 import "std/runtime"
@@ -21,13 +22,18 @@ type FnGetTempPathA = fn(u32, *u8) -> u32
 
 struct State {
     ready: u64
-    // Linux: libc gethostname / getcwd
-    // Windows: kernel32 GetComputerNameA / GetCurrentDirectoryA / GetTempPathA
+    // Linux: libc gethostname / getcwd / sysconf
+    // Windows: kernel32 path + machine APIs
     gethostname: PVOID
     getcwd: PVOID
     getComputerName: PVOID
     getCurrentDirectory: PVOID
     getTempPath: PVOID
+    sysconf: PVOID
+    getSystemInfo: PVOID
+    globalMemoryStatusEx: PVOID
+    getCurrentProcessId: PVOID
+    getUserName: PVOID
 }
 
 var g: State
@@ -50,6 +56,7 @@ fn ensure() -> *u8 {
         }
         g.gethostname = lresolve.Symbol(libc, __hash("gethostname"))
         g.getcwd = lresolve.Symbol(libc, __hash("getcwd"))
+        g.sysconf = lresolve.Symbol(libc, __hash("sysconf"))
         if g.gethostname == null {
             return "os: resolve failed"
         }
@@ -67,6 +74,10 @@ fn ensure() -> *u8 {
         g.getComputerName = wresolve.Symbol(k32, __hash("GetComputerNameA"))
         g.getCurrentDirectory = wresolve.Symbol(k32, __hash("GetCurrentDirectoryA"))
         g.getTempPath = wresolve.Symbol(k32, __hash("GetTempPathA"))
+        g.getSystemInfo = wresolve.Symbol(k32, __hash("GetSystemInfo"))
+        g.globalMemoryStatusEx = wresolve.Symbol(k32, __hash("GlobalMemoryStatusEx"))
+        g.getCurrentProcessId = wresolve.Symbol(k32, __hash("GetCurrentProcessId"))
+        g.getUserName = wresolve.Symbol(k32, __hash("GetUserNameA"))
         if g.getComputerName == null {
             return "os: resolve failed"
         }

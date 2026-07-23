@@ -1,0 +1,361 @@
+// Machine details: CPU count, RAM, PID, username, CPU model (easy dual-OS wins).
+package os
+
+import "std/runtime"
+import "std/env"
+import "std/file"
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+// Linux sysconf names (x86_64 glibc bits/confname.h)
+const SC_PAGESIZE: u64 = 30
+const SC_NPROCESSORS_ONLN: u64 = 84
+const SC_PHYS_PAGES: u64 = 85
+
+// Windows SYSTEM_INFO field offsets (x64)
+const SI_PAGE_SIZE: u64 = 4
+const SI_NUM_PROCESSORS: u64 = 32
+
+// MEMORYSTATUSEX
+const MSEX_SIZE: u64 = 64
+const MSEX_TOTAL_PHYS: u64 = 8
+
+type FnGetSystemInfo = fn(*void) -> void
+type FnGlobalMemoryStatusEx = fn(*void) -> u32
+type FnGetCurrentProcessId = fn() -> u32
+type FnGetUserNameA = fn(*u8, *u32) -> u32
+
+// ensureMachine resolves extra symbols used by machine APIs (idempotent with ensure).
+fn ensureMachine() -> *u8 {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return err
+    }
+    if runtime.IsLinux() {
+        if g.sysconf != null {
+            return 0
+        }
+        var hint: PVOID = runtime.StackHint()
+        var libc: PVOID = lresolve.Module(__hash("libc.so.6"), hint)
+        if libc == null {
+            libc = lresolve.Module(__hash("libc.so"), hint)
+        }
+        if libc == null {
+            return "os: resolve failed"
+        }
+        g.sysconf = lresolve.Symbol(libc, __hash("sysconf"))
+        if g.sysconf == null {
+            return "os: resolve failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        if g.getSystemInfo != null {
+            return 0
+        }
+        var k32: PVOID = wresolve.Module(__hash("KERNEL32.DLL"))
+        if k32 == null {
+            return "os: resolve failed"
+        }
+        g.getSystemInfo = wresolve.Symbol(k32, __hash("GetSystemInfo"))
+        g.globalMemoryStatusEx = wresolve.Symbol(k32, __hash("GlobalMemoryStatusEx"))
+        g.getCurrentProcessId = wresolve.Symbol(k32, __hash("GetCurrentProcessId"))
+        g.getUserName = wresolve.Symbol(k32, __hash("GetUserNameA"))
+        if g.getSystemInfo == null {
+            return "os: resolve failed"
+        }
+        if g.globalMemoryStatusEx == null {
+            return "os: resolve failed"
+        }
+        if g.getCurrentProcessId == null {
+            return "os: resolve failed"
+        }
+        if g.getUserName == null {
+            return "os: resolve failed"
+        }
+        return 0
+    }
+    return "os: unknown os"
+}
+
+// Arch returns the compile target architecture (static C string; do not Free).
+fn Arch() -> *u8 {
+    return "x86_64"
+}
+
+// OSName returns "linux", "windows", or "unknown" (static; do not Free).
+fn OSName() -> *u8 {
+    if runtime.IsLinux() {
+        return "linux"
+    }
+    if runtime.IsWindows() {
+        return "windows"
+    }
+    return "unknown"
+}
+
+// NumCPU returns the number of logical processors online.
+fn NumCPU() -> (u64, *u8) {
+    var err: *u8 = ensureMachine()
+    if err != 0 {
+        return 0, err
+    }
+    if runtime.IsLinux() {
+        var n: i64 = cast[i64](__sysv_call(g.sysconf, SC_NPROCESSORS_ONLN))
+        if n < 1 {
+            return 0, "os: sysconf nproc failed"
+        }
+        return cast[u64](n), 0
+    }
+    if runtime.IsWindows() {
+        var si: [48]u8
+        var f: FnGetSystemInfo = cast[FnGetSystemInfo](g.getSystemInfo)
+        f(cast[*void](&si[0]))
+        var n: u32 = __load32(cast[*void](&si[0] + SI_NUM_PROCESSORS))
+        if n == 0 {
+            return 0, "os: GetSystemInfo failed"
+        }
+        return cast[u64](n), 0
+    }
+    return 0, "os: unknown os"
+}
+
+// PageSize returns the system memory page size in bytes.
+fn PageSize() -> (u64, *u8) {
+    var err: *u8 = ensureMachine()
+    if err != 0 {
+        return 0, err
+    }
+    if runtime.IsLinux() {
+        var n: i64 = cast[i64](__sysv_call(g.sysconf, SC_PAGESIZE))
+        if n < 1 {
+            return 0, "os: sysconf pagesize failed"
+        }
+        return cast[u64](n), 0
+    }
+    if runtime.IsWindows() {
+        var si: [48]u8
+        var f: FnGetSystemInfo = cast[FnGetSystemInfo](g.getSystemInfo)
+        f(cast[*void](&si[0]))
+        var n: u32 = __load32(cast[*void](&si[0] + SI_PAGE_SIZE))
+        if n == 0 {
+            return 0, "os: GetSystemInfo failed"
+        }
+        return cast[u64](n), 0
+    }
+    return 0, "os: unknown os"
+}
+
+// TotalRAM returns approximate total physical memory in bytes.
+fn TotalRAM() -> (u64, *u8) {
+    var err: *u8 = ensureMachine()
+    if err != 0 {
+        return 0, err
+    }
+    if runtime.IsLinux() {
+        var pages: i64 = cast[i64](__sysv_call(g.sysconf, SC_PHYS_PAGES))
+        var pgsz: i64 = cast[i64](__sysv_call(g.sysconf, SC_PAGESIZE))
+        if pages < 1 || pgsz < 1 {
+            return 0, "os: sysconf ram failed"
+        }
+        return cast[u64](pages) * cast[u64](pgsz), 0
+    }
+    if runtime.IsWindows() {
+        var buf: [64]u8
+        var i: u64 = 0
+        while i < MSEX_SIZE {
+            buf[i] = 0
+            i = i + 1
+        }
+        // dwLength
+        __store32(cast[*void](&buf[0]), cast[u64](MSEX_SIZE))
+        var f: FnGlobalMemoryStatusEx = cast[FnGlobalMemoryStatusEx](g.globalMemoryStatusEx)
+        var ok: u32 = f(cast[*void](&buf[0]))
+        if ok == 0 {
+            return 0, "os: GlobalMemoryStatusEx failed"
+        }
+        var total: u64 = __load64(cast[*void](&buf[0] + MSEX_TOTAL_PHYS))
+        if total == 0 {
+            return 0, "os: no ram"
+        }
+        return total, 0
+    }
+    return 0, "os: unknown os"
+}
+
+// PID returns the current process id.
+fn PID() -> (u64, *u8) {
+    if !runtime.Ready() {
+        return 0, "os: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        // getpid syscall 39
+        var p: i64 = cast[i64](__syscall(39))
+        if p < 1 {
+            return 0, "os: getpid failed"
+        }
+        return cast[u64](p), 0
+    }
+    if runtime.IsWindows() {
+        var err: *u8 = ensureMachine()
+        if err != 0 {
+            return 0, err
+        }
+        var f: FnGetCurrentProcessId = cast[FnGetCurrentProcessId](g.getCurrentProcessId)
+        var p: u32 = f()
+        if p == 0 {
+            return 0, "os: GetCurrentProcessId failed"
+        }
+        return cast[u64](p), 0
+    }
+    return 0, "os: unknown os"
+}
+
+// Username returns the login / account name (heap C string). Caller runtime.Free.
+// Linux: $USER. Windows: GetUserNameA.
+fn Username() -> (*u8, *u8) {
+    if !runtime.Ready() {
+        return null, "os: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        var v: *u8
+        var ok: bool
+        var err: *u8
+        v, ok, err = env.Lookup("USER")
+        if err != 0 {
+            return null, err
+        }
+        if !ok {
+            return null, "os: no user"
+        }
+        return v, 0
+    }
+    if runtime.IsWindows() {
+        var err: *u8 = ensureMachine()
+        if err != 0 {
+            return null, err
+        }
+        var buf: [256]u8
+        var n: u32 = 256
+        var f: FnGetUserNameA = cast[FnGetUserNameA](g.getUserName)
+        var ok: u32 = f(&buf[0], &n)
+        if ok == 0 {
+            return null, "os: GetUserName failed"
+        }
+        return dupCstr(&buf[0])
+    }
+    return null, "os: unknown os"
+}
+
+fn startsWith(s: *u8, n: u64, pref: *u8) -> bool {
+    var i: u64 = 0
+    while *(pref + i) != 0 {
+        if i >= n {
+            return false
+        }
+        if *(s + i) != *(pref + i) {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// parseCPUModel finds first "model name" line in /proc/cpuinfo-style text.
+fn parseCPUModel(data: *u8, n: u64) -> (*u8, *u8) {
+    var i: u64 = 0
+    while i < n {
+        var line: u64 = i
+        while i < n {
+            if *(data + i) == 10 {
+                break
+            }
+            i = i + 1
+        }
+        var lineLen: u64 = i - line
+        if startsWith(data + line, lineLen, "model name") {
+            var p: u64 = line
+            while p < line + lineLen {
+                if *(data + p) == 58 {
+                    p = p + 1
+                    while p < line + lineLen {
+                        if *(data + p) != 32 {
+                            if *(data + p) != 9 {
+                                break
+                            }
+                        }
+                        p = p + 1
+                    }
+                    var mlen: u64 = line + lineLen - p
+                    // trim trailing CR
+                    if mlen > 0 {
+                        if *(data + p + mlen - 1) == 13 {
+                            mlen = mlen - 1
+                        }
+                    }
+                    if mlen == 0 {
+                        return null, "os: empty cpu model"
+                    }
+                    return allocCopy(data + p, mlen)
+                }
+                p = p + 1
+            }
+        }
+        if i < n {
+            i = i + 1
+        }
+    }
+    return null, "os: no cpu model"
+}
+
+// CPUModel returns a CPU brand/model string (heap). Caller runtime.Free.
+// Linux: first "model name" from /proc/cpuinfo. Windows: PROCESSOR_IDENTIFIER.
+// Note: /proc files often report size 0, so we read into a fixed buffer (not ReadAll).
+fn CPUModel() -> (*u8, *u8) {
+    if !runtime.Ready() {
+        return null, "os: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        var h: file.Handle
+        var err: *u8
+        h, err = file.Open("/proc/cpuinfo", file.O_READ)
+        if err != 0 {
+            return null, err
+        }
+        // typical cpuinfo is a few KB; cap at 64KiB
+        var buf: [65536]u8
+        var total: u64 = 0
+        while total < 65536 {
+            var nr: u64
+            var e2: *u8
+            nr, e2 = file.Read(h, &buf[0] + total, 65536 - total)
+            if e2 != 0 {
+                file.Close(h)
+                return null, e2
+            }
+            if nr == 0 {
+                break
+            }
+            total = total + nr
+        }
+        file.Close(h)
+        if total == 0 {
+            return null, "os: empty cpuinfo"
+        }
+        return parseCPUModel(&buf[0], total)
+    }
+    if runtime.IsWindows() {
+        var v: *u8
+        var ok: bool
+        var err: *u8
+        v, ok, err = env.Lookup("PROCESSOR_IDENTIFIER")
+        if err != 0 {
+            return null, err
+        }
+        if !ok {
+            return null, "os: no cpu model"
+        }
+        return v, 0
+    }
+    return null, "os: unknown os"
+}

@@ -782,6 +782,44 @@ fn main(stackHint: *void) -> u64 {
 	}
 }
 
+func TestOsMachine(t *testing.T) {
+	src := `
+import "std/runtime"
+import "std/os"
+import "std/strings"
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
+    if !strings.Compare(os.OSName(), "linux") { return 2 }
+    if !strings.Compare(os.Arch(), "x86_64") { return 3 }
+    n, err := os.NumCPU()
+    if err != 0 { return 4 }
+    if n < 1 { return 5 }
+    ps, err2 := os.PageSize()
+    if err2 != 0 { return 6 }
+    if ps < 4096 { return 7 }
+    ram, err3 := os.TotalRAM()
+    if err3 != 0 { return 8 }
+    if ram < 1024 * 1024 { return 9 }
+    pid, err4 := os.PID()
+    if err4 != 0 { return 10 }
+    if pid < 1 { return 11 }
+    user, err5 := os.Username()
+    if err5 != 0 { return 12 }
+    if user == null || __strlen(user) == 0 { return 13 }
+    runtime.Free(user)
+    model, err6 := os.CPUModel()
+    if err6 != 0 { return 14 }
+    if model == null || __strlen(model) == 0 { runtime.Free(model); return 15 }
+    runtime.Free(model)
+    return 0
+}
+`
+	res := compile(t, src)
+	if got := runBlob(t, res.Code); got != 0 {
+		t.Fatalf("os machine: want 0, got %d", got)
+	}
+}
+
 func TestOsHostPaths(t *testing.T) {
 	src := `
 import "std/runtime"
