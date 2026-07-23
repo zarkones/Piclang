@@ -724,6 +724,102 @@ fn main(stackHint: *void) -> u64 {
 	}
 }
 
+func TestHashDigests(t *testing.T) {
+	src := `
+import "std/runtime"
+import "std/hash"
+import "std/crypto"
+import "std/strings"
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
+    var d: *u8 = "abc"
+    var out: [32]u8
+    var hx: *u8
+    var err: *u8
+
+    if hash.MD5(d, 3, &out[0]) != 0 { return 10 }
+    hx, err = crypto.HexEncode(&out[0], 16)
+    if err != 0 { return 11 }
+    if !strings.Compare(hx, "900150983cd24fb0d6963f7d28e17f72") { runtime.Free(hx); return 12 }
+    runtime.Free(hx)
+
+    if hash.SHA1(d, 3, &out[0]) != 0 { return 20 }
+    hx, err = crypto.HexEncode(&out[0], 20)
+    if err != 0 { return 21 }
+    if !strings.Compare(hx, "a9993e364706816aba3e25717850c26c9cd0d89d") { runtime.Free(hx); return 22 }
+    runtime.Free(hx)
+
+    if hash.SHA256(d, 3, &out[0]) != 0 { return 30 }
+    hx, err = crypto.HexEncode(&out[0], 32)
+    if err != 0 { return 31 }
+    if !strings.Compare(hx, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") { runtime.Free(hx); return 32 }
+    runtime.Free(hx)
+
+    if hash.MD5(cast[*u8](0), 0, &out[0]) != 0 { return 40 }
+    hx, err = crypto.HexEncode(&out[0], 16)
+    if err != 0 { return 41 }
+    if !strings.Compare(hx, "d41d8cd98f00b204e9800998ecf8427e") { runtime.Free(hx); return 42 }
+    runtime.Free(hx)
+
+    if hash.SHA1(cast[*u8](0), 0, &out[0]) != 0 { return 50 }
+    hx, err = crypto.HexEncode(&out[0], 20)
+    if err != 0 { return 51 }
+    if !strings.Compare(hx, "da39a3ee5e6b4b0d3255bfef95601890afd80709") { runtime.Free(hx); return 52 }
+    runtime.Free(hx)
+
+    if hash.SHA256(cast[*u8](0), 0, &out[0]) != 0 { return 60 }
+    hx, err = crypto.HexEncode(&out[0], 32)
+    if err != 0 { return 61 }
+    if !strings.Compare(hx, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") { runtime.Free(hx); return 62 }
+    runtime.Free(hx)
+
+    return 0
+}
+`
+	res := compile(t, src)
+	if got := runBlob(t, res.Code); got != 0 {
+		t.Fatalf("hash digests: want 0, got %d", got)
+	}
+}
+
+func TestOsHostPaths(t *testing.T) {
+	src := `
+import "std/runtime"
+import "std/env"
+import "std/os"
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
+    h, err := os.Hostname()
+    if err != 0 { return 2 }
+    if h == null { return 3 }
+    if __strlen(h) == 0 { runtime.Free(h); return 4 }
+    runtime.Free(h)
+    p, err2 := os.GetCwd()
+    if err2 != 0 { return 5 }
+    if p == null { return 6 }
+    if *p != 47 { runtime.Free(p); return 7 }
+    runtime.Free(p)
+    td, err3 := os.GetTempDir()
+    if err3 != 0 { return 8 }
+    if td == null { return 9 }
+    if __strlen(td) == 0 { runtime.Free(td); return 10 }
+    runtime.Free(td)
+    if env.Set("HOME", "/tmp") != 0 { return 11 }
+    home, err4 := os.GetHomeDir()
+    if err4 != 0 { return 12 }
+    if home == null { return 13 }
+    if __strlen(home) != 4 { runtime.Free(home); return 14 }
+    if *home != 47 { runtime.Free(home); return 15 }
+    runtime.Free(home)
+    return 0
+}
+`
+	res := compile(t, src)
+	if got := runBlob(t, res.Code); got != 0 {
+		t.Fatalf("os: want 0, got %d", got)
+	}
+}
+
 func TestSixArgABI(t *testing.T) {
 	src := `
 fn six(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) -> u64 {

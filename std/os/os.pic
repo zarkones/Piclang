@@ -1,0 +1,286 @@
+// Package os - dual-OS host and process path helpers.
+//
+// Requires runtime.Init first. Fallible APIs return (heap *u8, *u8) where
+// err == 0 means success. Caller runtime.Free's the string.
+package os
+
+import "std/runtime"
+import "std/mem"
+import "std/env"
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+type PVOID = *void
+
+const HOST_MAX: u64 = 256
+const PATH_MAX: u64 = 4096
+
+type FnGetComputerNameA = fn(*u8, *u32) -> u32
+type FnGetCurrentDirectoryA = fn(u32, *u8) -> u32
+type FnGetTempPathA = fn(u32, *u8) -> u32
+
+struct State {
+    ready: u64
+    // Linux: libc gethostname / getcwd
+    // Windows: kernel32 GetComputerNameA / GetCurrentDirectoryA / GetTempPathA
+    gethostname: PVOID
+    getcwd: PVOID
+    getComputerName: PVOID
+    getCurrentDirectory: PVOID
+    getTempPath: PVOID
+}
+
+var g: State
+
+fn ensure() -> *u8 {
+    if g.ready != 0 {
+        return 0
+    }
+    if !runtime.Ready() {
+        return "os: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        var hint: PVOID = runtime.StackHint()
+        var libc: PVOID = lresolve.Module(__hash("libc.so.6"), hint)
+        if libc == null {
+            libc = lresolve.Module(__hash("libc.so"), hint)
+        }
+        if libc == null {
+            return "os: resolve failed"
+        }
+        g.gethostname = lresolve.Symbol(libc, __hash("gethostname"))
+        g.getcwd = lresolve.Symbol(libc, __hash("getcwd"))
+        if g.gethostname == null {
+            return "os: resolve failed"
+        }
+        if g.getcwd == null {
+            return "os: resolve failed"
+        }
+        g.ready = 1
+        return 0
+    }
+    if runtime.IsWindows() {
+        var k32: PVOID = wresolve.Module(__hash("KERNEL32.DLL"))
+        if k32 == null {
+            return "os: resolve failed"
+        }
+        g.getComputerName = wresolve.Symbol(k32, __hash("GetComputerNameA"))
+        g.getCurrentDirectory = wresolve.Symbol(k32, __hash("GetCurrentDirectoryA"))
+        g.getTempPath = wresolve.Symbol(k32, __hash("GetTempPathA"))
+        if g.getComputerName == null {
+            return "os: resolve failed"
+        }
+        if g.getCurrentDirectory == null {
+            return "os: resolve failed"
+        }
+        if g.getTempPath == null {
+            return "os: resolve failed"
+        }
+        g.ready = 1
+        return 0
+    }
+    return "os: unknown os"
+}
+
+fn allocCopy(s: *u8, n: u64) -> (*u8, *u8) {
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(n + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    if n > 0 && s != null {
+        mem.Copy(cast[*void](out), cast[*void](s), n)
+    }
+    *(out + n) = 0
+    return out, 0
+}
+
+fn dupCstr(s: *u8) -> (*u8, *u8) {
+    if s == null {
+        return allocCopy(cast[*u8](null), 0)
+    }
+    return allocCopy(s, __strlen(s))
+}
+
+// Hostname returns the system hostname as a heap C string.
+fn Hostname() -> (*u8, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return null, err
+    }
+    if runtime.IsLinux() {
+        var buf: [256]u8
+        // gethostname(buf, len) SysV
+        var rc: i64 = cast[i64](__sysv_call(g.gethostname, cast[u64](&buf[0]), HOST_MAX))
+        if rc != 0 {
+            return null, "os: gethostname failed"
+        }
+        buf[255] = 0
+        return dupCstr(&buf[0])
+    }
+    if runtime.IsWindows() {
+        var buf: [256]u8
+        var n: u32 = cast[u32](HOST_MAX)
+        var f: FnGetComputerNameA = cast[FnGetComputerNameA](g.getComputerName)
+        var ok: u32 = f(&buf[0], &n)
+        if ok == 0 {
+            return null, "os: GetComputerName failed"
+        }
+        return dupCstr(&buf[0])
+    }
+    return null, "os: unknown os"
+}
+
+// GetCwd returns the current working directory as a heap C string.
+fn GetCwd() -> (*u8, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return null, err
+    }
+    if runtime.IsLinux() {
+        var buf: [4096]u8
+        // getcwd(buf, size) returns buf or null
+        var p: *u8 = cast[*u8](__sysv_call(g.getcwd, cast[u64](&buf[0]), PATH_MAX))
+        if p == null {
+            return null, "os: getcwd failed"
+        }
+        return dupCstr(p)
+    }
+    if runtime.IsWindows() {
+        var buf: [4096]u8
+        var f: FnGetCurrentDirectoryA = cast[FnGetCurrentDirectoryA](g.getCurrentDirectory)
+        var n: u32 = f(cast[u32](PATH_MAX), &buf[0])
+        if n == 0 {
+            return null, "os: GetCurrentDirectory failed"
+        }
+        if cast[u64](n) >= PATH_MAX {
+            return null, "os: path too long"
+        }
+        return dupCstr(&buf[0])
+    }
+    return null, "os: unknown os"
+}
+
+// GetHomeDir returns the user home directory (heap C string).
+// Linux: $HOME. Windows: $USERPROFILE, else HOMEDRIVE+HOMEPATH.
+fn GetHomeDir() -> (*u8, *u8) {
+    if !runtime.Ready() {
+        return null, "os: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        var v: *u8
+        var ok: bool
+        var err: *u8
+        v, ok, err = env.Lookup("HOME")
+        if err != 0 {
+            return null, err
+        }
+        if !ok {
+            return null, "os: no home"
+        }
+        return v, 0
+    }
+    if runtime.IsWindows() {
+        var v: *u8
+        var ok: bool
+        var err: *u8
+        v, ok, err = env.Lookup("USERPROFILE")
+        if err != 0 {
+            return null, err
+        }
+        if ok {
+            return v, 0
+        }
+        var drive: *u8
+        var okD: bool
+        drive, okD, err = env.Lookup("HOMEDRIVE")
+        if err != 0 {
+            return null, err
+        }
+        var path: *u8
+        var okP: bool
+        path, okP, err = env.Lookup("HOMEPATH")
+        if err != 0 {
+            if okD {
+                runtime.Free(cast[*void](drive))
+            }
+            return null, err
+        }
+        if !okD || !okP {
+            if okD {
+                runtime.Free(cast[*void](drive))
+            }
+            if okP {
+                runtime.Free(cast[*void](path))
+            }
+            return null, "os: no home"
+        }
+        var nd: u64 = __strlen(drive)
+        var np: u64 = __strlen(path)
+        var raw: *void
+        raw, err = runtime.Alloc(nd + np + 1)
+        if err != 0 {
+            runtime.Free(cast[*void](drive))
+            runtime.Free(cast[*void](path))
+            return null, err
+        }
+        var out: *u8 = cast[*u8](raw)
+        mem.Copy(cast[*void](out), cast[*void](drive), nd)
+        mem.Copy(cast[*void](out + nd), cast[*void](path), np + 1)
+        runtime.Free(cast[*void](drive))
+        runtime.Free(cast[*void](path))
+        return out, 0
+    }
+    return null, "os: unknown os"
+}
+
+// GetTempDir returns a preferred temporary directory (heap C string).
+// Linux: $TMPDIR or "/tmp". Windows: GetTempPathA, else TEMP/TMP env.
+fn GetTempDir() -> (*u8, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return null, err
+    }
+    if runtime.IsLinux() {
+        var v: *u8
+        var ok: bool
+        v, ok, err = env.Lookup("TMPDIR")
+        if err != 0 {
+            return null, err
+        }
+        if ok {
+            return v, 0
+        }
+        return dupCstr("/tmp")
+    }
+    if runtime.IsWindows() {
+        var buf: [4096]u8
+        var f: FnGetTempPathA = cast[FnGetTempPathA](g.getTempPath)
+        var n: u32 = f(cast[u32](PATH_MAX), &buf[0])
+        if n != 0 {
+            if cast[u64](n) < PATH_MAX {
+                return dupCstr(&buf[0])
+            }
+        }
+        var v: *u8
+        var ok: bool
+        v, ok, err = env.Lookup("TEMP")
+        if err != 0 {
+            return null, err
+        }
+        if ok {
+            return v, 0
+        }
+        v, ok, err = env.Lookup("TMP")
+        if err != 0 {
+            return null, err
+        }
+        if ok {
+            return v, 0
+        }
+        return null, "os: no temp dir"
+    }
+    return null, "os: unknown os"
+}

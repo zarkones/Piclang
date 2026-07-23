@@ -1,7 +1,163 @@
-// Package hash - shared djb2 (ASCII uppercase) hashing for module/API names.
+// Package hash - djb2 name hashing plus freestanding MD5 / SHA-1 / SHA-256.
+// Digest one-shots write into a caller buffer (MD5_SIZE / SHA1_SIZE / SHA256_SIZE).
+// Optional Sum* helpers return heap digests (caller runtime.Free).
+//
+// Note: Piclang u32 locals do not auto-wrap; use add32/as32 for modular arithmetic.
 package hash
 
-// String hashes a NUL-terminated C string (runtime).
+import "std/runtime"
+
+const MD5_SIZE: u64 = 16
+const SHA1_SIZE: u64 = 20
+const SHA256_SIZE: u64 = 32
+
+// String hashes a NUL-terminated C string (djb2 uppercase; same as __hash).
 fn String(s: *u8) -> u32 {
     return __hash(s)
+}
+
+// as32 truncates to low 32 bits (unsigned wrap).
+fn as32(x: u64) -> u32 {
+    return cast[u32](x & 0xffffffff)
+}
+
+// not32 is bitwise complement on 32 bits (unary ~ is 64-bit wide).
+fn not32(x: u32) -> u32 {
+    return as32((~cast[u64](x)) & 0xffffffff)
+}
+
+fn add32(a: u32, b: u32) -> u32 {
+    return as32(cast[u64](a) + cast[u64](b))
+}
+
+fn add32x3(a: u32, b: u32, c: u32) -> u32 {
+    return as32(cast[u64](a) + cast[u64](b) + cast[u64](c))
+}
+
+fn add32x4(a: u32, b: u32, c: u32, d: u32) -> u32 {
+    return as32(cast[u64](a) + cast[u64](b) + cast[u64](c) + cast[u64](d))
+}
+
+fn add32x5(a: u32, b: u32, c: u32, d: u32, e: u32) -> u32 {
+    return as32(cast[u64](a) + cast[u64](b) + cast[u64](c) + cast[u64](d) + cast[u64](e))
+}
+
+fn rotl32(x: u32, n: u32) -> u32 {
+    var v: u64 = cast[u64](x) & 0xffffffff
+    if n == 0 {
+        return cast[u32](v)
+    }
+    var r: u64 = ((v << n) | (v >> (32 - n))) & 0xffffffff
+    return cast[u32](r)
+}
+
+fn rotr32(x: u32, n: u32) -> u32 {
+    var v: u64 = cast[u64](x) & 0xffffffff
+    if n == 0 {
+        return cast[u32](v)
+    }
+    var r: u64 = ((v >> n) | (v << (32 - n))) & 0xffffffff
+    return cast[u32](r)
+}
+
+fn loadLE32(p: *u8) -> u32 {
+    return cast[u32](*p) | (cast[u32](*(p + 1)) << 8) | (cast[u32](*(p + 2)) << 16) | (cast[u32](*(p + 3)) << 24)
+}
+
+fn storeLE32(p: *u8, v: u32) {
+    *p = cast[u8](v)
+    *(p + 1) = cast[u8](v >> 8)
+    *(p + 2) = cast[u8](v >> 16)
+    *(p + 3) = cast[u8](v >> 24)
+}
+
+fn loadBE32(p: *u8) -> u32 {
+    return (cast[u32](*p) << 24) | (cast[u32](*(p + 1)) << 16) | (cast[u32](*(p + 2)) << 8) | cast[u32](*(p + 3))
+}
+
+fn storeBE32(p: *u8, v: u32) {
+    *p = cast[u8](v >> 24)
+    *(p + 1) = cast[u8](v >> 16)
+    *(p + 2) = cast[u8](v >> 8)
+    *(p + 3) = cast[u8](v)
+}
+
+fn storeBE64(p: *u8, v: u64) {
+    *p = cast[u8](v >> 56)
+    *(p + 1) = cast[u8](v >> 48)
+    *(p + 2) = cast[u8](v >> 40)
+    *(p + 3) = cast[u8](v >> 32)
+    *(p + 4) = cast[u8](v >> 24)
+    *(p + 5) = cast[u8](v >> 16)
+    *(p + 6) = cast[u8](v >> 8)
+    *(p + 7) = cast[u8](v)
+}
+
+fn storeLE64(p: *u8, v: u64) {
+    *p = cast[u8](v)
+    *(p + 1) = cast[u8](v >> 8)
+    *(p + 2) = cast[u8](v >> 16)
+    *(p + 3) = cast[u8](v >> 24)
+    *(p + 4) = cast[u8](v >> 32)
+    *(p + 5) = cast[u8](v >> 40)
+    *(p + 6) = cast[u8](v >> 48)
+    *(p + 7) = cast[u8](v >> 56)
+}
+
+fn sumAlloc(n: u64) -> (*u8, *u8) {
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(n)
+    if err != 0 {
+        return null, err
+    }
+    return cast[*u8](raw), 0
+}
+
+// SumMD5 returns a 16-byte heap digest. Caller runtime.Free.
+fn SumMD5(data: *u8, n: u64) -> (*u8, *u8) {
+    var out: *u8
+    var err: *u8
+    out, err = sumAlloc(MD5_SIZE)
+    if err != 0 {
+        return null, err
+    }
+    err = MD5(data, n, out)
+    if err != 0 {
+        runtime.Free(cast[*void](out))
+        return null, err
+    }
+    return out, 0
+}
+
+// SumSHA1 returns a 20-byte heap digest. Caller runtime.Free.
+fn SumSHA1(data: *u8, n: u64) -> (*u8, *u8) {
+    var out: *u8
+    var err: *u8
+    out, err = sumAlloc(SHA1_SIZE)
+    if err != 0 {
+        return null, err
+    }
+    err = SHA1(data, n, out)
+    if err != 0 {
+        runtime.Free(cast[*void](out))
+        return null, err
+    }
+    return out, 0
+}
+
+// SumSHA256 returns a 32-byte heap digest. Caller runtime.Free.
+fn SumSHA256(data: *u8, n: u64) -> (*u8, *u8) {
+    var out: *u8
+    var err: *u8
+    out, err = sumAlloc(SHA256_SIZE)
+    if err != 0 {
+        return null, err
+    }
+    err = SHA256(data, n, out)
+    if err != 0 {
+        runtime.Free(cast[*void](out))
+        return null, err
+    }
+    return out, 0
 }
