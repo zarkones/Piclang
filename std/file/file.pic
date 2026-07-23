@@ -1,6 +1,6 @@
 // Package file - dual-OS file I/O for PIC implants.
 //
-// Requires runtime.Init(stack_hint) first. APIs resolve libc (Linux) or
+// Requires runtime.Init(stackHint) first. APIs resolve libc (Linux) or
 // kernel32 (Windows) on first use.
 //
 // Errors: fallible APIs return *u8 where 0 means success.
@@ -79,15 +79,15 @@ fn ensure() -> *u8 {
         return "file: runtime not ready"
     }
     if runtime.IsLinux() {
-        return ensure_linux()
+        return ensureLinux()
     }
     if runtime.IsWindows() {
-        return ensure_windows()
+        return ensureWindows()
     }
     return "file: unknown os"
 }
 
-fn ensure_linux() -> *u8 {
+fn ensureLinux() -> *u8 {
     var hint: PVOID = runtime.StackHint()
     var H_LIBC6: u32 = __hash("libc.so.6")
     var H_LIBC: u32 = __hash("libc.so")
@@ -126,7 +126,7 @@ fn ensure_linux() -> *u8 {
     return 0
 }
 
-fn ensure_windows() -> *u8 {
+fn ensureWindows() -> *u8 {
     var H_K32: u32 = __hash("KERNEL32.DLL")
     var k32: PVOID = wresolve.Module(H_K32)
     if k32 == null {
@@ -170,15 +170,15 @@ fn Open(path: *u8, mode: u64) -> (Handle, *u8) {
         return INVALID, "file: null path"
     }
     if runtime.IsLinux() {
-        return open_linux(path, mode)
+        return openLinux(path, mode)
     }
     if runtime.IsWindows() {
-        return open_windows(path, mode)
+        return openWindows(path, mode)
     }
     return INVALID, "file: unknown os"
 }
 
-fn open_linux(path: *u8, mode: u64) -> (Handle, *u8) {
+fn openLinux(path: *u8, mode: u64) -> (Handle, *u8) {
     var flags: u64 = L_O_RDONLY
     var perm: u64 = 0
     if mode == O_WRITE {
@@ -196,7 +196,7 @@ fn open_linux(path: *u8, mode: u64) -> (Handle, *u8) {
     return cast[Handle](fd), 0
 }
 
-fn open_windows(path: *u8, mode: u64) -> (Handle, *u8) {
+fn openWindows(path: *u8, mode: u64) -> (Handle, *u8) {
     var access: u32 = cast[u32](W_GENERIC_READ)
     var share: u32 = cast[u32](W_FILE_SHARE_READ)
     var disp: u32 = cast[u32](W_OPEN_EXISTING)
@@ -245,7 +245,7 @@ fn Close(h: Handle) -> *u8 {
     return "file: unknown os"
 }
 
-// Read reads up to n bytes into buf. Returns (bytes_read, err).
+// Read reads up to n bytes into buf. Returns (bytesRead, err).
 fn Read(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     var err: *u8 = ensure()
     if err != 0 {
@@ -276,7 +276,7 @@ fn Read(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     return 0, "file: unknown os"
 }
 
-// Write writes n bytes from buf. Returns (bytes_written, err).
+// Write writes n bytes from buf. Returns (bytesWritten, err).
 fn Write(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     var err: *u8 = ensure()
     if err != 0 {

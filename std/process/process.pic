@@ -1,6 +1,6 @@
 // Package process - dual-OS process spawn with stdio pipes, cwd, env, shell helpers.
 //
-// Requires runtime.Init(stack_hint). Fallible APIs use *u8 errors (0 = ok).
+// Requires runtime.Init(stackHint). Fallible APIs use *u8 errors (0 = ok).
 //
 // Linux: raw syscalls (pipe/fork/execve/wait4/…). Windows: kernel32 CreateProcessA + pipes.
 //
@@ -23,7 +23,7 @@ type Handle = u64
 
 const INVALID: u64 = 0xFFFFFFFFFFFFFFFF
 
-// Stdio modes for Cmd.stdin_mode / stdout_mode / stderr_mode.
+// Stdio modes for Cmd.stdinMode / stdoutMode / stderrMode.
 const STD_INHERIT: u64 = 0
 const STD_PIPE: u64 = 1
 const STD_NULL: u64 = 2
@@ -31,7 +31,7 @@ const STD_NULL: u64 = 2
 // Soft cap for captured output (64 MiB).
 const MAX_OUTPUT: u64 = 67108864
 
-// Linux syscalls (x86_64)
+// Linux syscalls (x8664)
 const SYS_READ: u64 = 0
 const SYS_WRITE: u64 = 1
 const SYS_CLOSE: u64 = 3
@@ -84,26 +84,26 @@ struct Cmd {
     argv: **u8      // null-terminated argv; null → [path, null]
     dir: *u8        // working directory; null = inherit
     env: **u8       // null-terminated envp (KEY=VAL); null = inherit
-    stdin_mode: u64
-    stdout_mode: u64
-    stderr_mode: u64
+    stdinMode: u64
+    stdoutMode: u64
+    stderrMode: u64
     // Windows: full command line (if set, used instead of building from argv)
     cmdline: *u8
     // hide console window on Windows (default true for shell helpers)
-    hide_window: u64
+    hideWindow: u64
 
     // --- state (filled by Start / Wait) ---
     pid: u64
-    exit_code: i32
+    exitCode: i32
     started: u64
     waited: u64
     // parent-side pipe ends (close with Release)
-    stdin_w: Handle
-    stdout_r: Handle
-    stderr_r: Handle
+    stdinW: Handle
+    stdoutR: Handle
+    stderrR: Handle
     // Windows process/thread handles
-    h_process: Handle
-    h_thread: Handle
+    hProcess: Handle
+    hThread: Handle
     // internal child-side pipe ends (closed after Start)
     _in_r: Handle
     _out_w: Handle
@@ -120,16 +120,16 @@ struct State {
     ready: u64
     environ: **u8
     // Windows API pointers
-    create_pipe: PVOID
-    set_handle_info: PVOID
-    create_process: PVOID
-    wait_object: PVOID
-    get_exit: PVOID
+    createPipe: PVOID
+    setHandleInfo: PVOID
+    createProcess: PVOID
+    waitObject: PVOID
+    getExit: PVOID
     terminate: PVOID
-    close_handle: PVOID
-    read_file: PVOID
-    write_file: PVOID
-    create_file: PVOID
+    closeHandle: PVOID
+    readFile: PVOID
+    writeFile: PVOID
+    createFile: PVOID
 }
 
 var g: State
@@ -137,11 +137,11 @@ var g: State
 // Zero clears a Cmd to defaults (inherit stdio, visible window flag 0).
 fn Zero(c: *Cmd) {
     __memset(cast[*void](c), 0, sizeof(Cmd))
-    c.stdin_w = INVALID
-    c.stdout_r = INVALID
-    c.stderr_r = INVALID
-    c.h_process = INVALID
-    c.h_thread = INVALID
+    c.stdinW = INVALID
+    c.stdoutR = INVALID
+    c.stderrR = INVALID
+    c.hProcess = INVALID
+    c.hThread = INVALID
     c._in_r = INVALID
     c._out_w = INVALID
     c._err_w = INVALID
@@ -170,22 +170,22 @@ fn SetEnv(c: *Cmd, env: **u8) {
 
 // SetStdin / SetStdout / SetStderr set STD_INHERIT, STD_PIPE, or STD_NULL.
 fn SetStdin(c: *Cmd, mode: u64) {
-    c.stdin_mode = mode
+    c.stdinMode = mode
 }
 
 fn SetStdout(c: *Cmd, mode: u64) {
-    c.stdout_mode = mode
+    c.stdoutMode = mode
 }
 
 fn SetStderr(c: *Cmd, mode: u64) {
-    c.stderr_mode = mode
+    c.stderrMode = mode
 }
 
 // PipeAll sets stdin/stdout/stderr to STD_PIPE.
 fn PipeAll(c: *Cmd) {
-    c.stdin_mode = STD_PIPE
-    c.stdout_mode = STD_PIPE
-    c.stderr_mode = STD_PIPE
+    c.stdinMode = STD_PIPE
+    c.stdoutMode = STD_PIPE
+    c.stderrMode = STD_PIPE
 }
 
 fn ensure() -> *u8 {
@@ -196,15 +196,15 @@ fn ensure() -> *u8 {
         return "process: runtime not ready"
     }
     if runtime.IsLinux() {
-        return ensure_linux()
+        return ensureLinux()
     }
     if runtime.IsWindows() {
-        return ensure_windows()
+        return ensureWindows()
     }
     return "process: unknown os"
 }
 
-fn ensure_linux() -> *u8 {
+fn ensureLinux() -> *u8 {
     var hint: PVOID = runtime.StackHint()
     var libc: PVOID = lresolve.Module(__hash("libc.so.6"), hint)
     if libc == null {
@@ -213,48 +213,48 @@ fn ensure_linux() -> *u8 {
     if libc == null {
         return "process: resolve failed"
     }
-    var environ_sym: PVOID = lresolve.Symbol(libc, __hash("environ"))
-    if environ_sym != null {
-        g.environ = cast[**u8](__load64(environ_sym))
+    var environSym: PVOID = lresolve.Symbol(libc, __hash("environ"))
+    if environSym != null {
+        g.environ = cast[**u8](__load64(environSym))
     }
     g.ready = 1
     return 0
 }
 
-fn ensure_windows() -> *u8 {
+fn ensureWindows() -> *u8 {
     var k32: PVOID = wresolve.Module(__hash("KERNEL32.DLL"))
     if k32 == null {
         return "process: resolve failed"
     }
-    g.create_pipe = wresolve.Symbol(k32, __hash("CreatePipe"))
-    g.set_handle_info = wresolve.Symbol(k32, __hash("SetHandleInformation"))
-    g.create_process = wresolve.Symbol(k32, __hash("CreateProcessA"))
-    g.wait_object = wresolve.Symbol(k32, __hash("WaitForSingleObject"))
-    g.get_exit = wresolve.Symbol(k32, __hash("GetExitCodeProcess"))
+    g.createPipe = wresolve.Symbol(k32, __hash("CreatePipe"))
+    g.setHandleInfo = wresolve.Symbol(k32, __hash("SetHandleInformation"))
+    g.createProcess = wresolve.Symbol(k32, __hash("CreateProcessA"))
+    g.waitObject = wresolve.Symbol(k32, __hash("WaitForSingleObject"))
+    g.getExit = wresolve.Symbol(k32, __hash("GetExitCodeProcess"))
     g.terminate = wresolve.Symbol(k32, __hash("TerminateProcess"))
-    g.close_handle = wresolve.Symbol(k32, __hash("CloseHandle"))
-    g.read_file = wresolve.Symbol(k32, __hash("ReadFile"))
-    g.write_file = wresolve.Symbol(k32, __hash("WriteFile"))
-    g.create_file = wresolve.Symbol(k32, __hash("CreateFileA"))
-    if g.create_pipe == null {
+    g.closeHandle = wresolve.Symbol(k32, __hash("CloseHandle"))
+    g.readFile = wresolve.Symbol(k32, __hash("ReadFile"))
+    g.writeFile = wresolve.Symbol(k32, __hash("WriteFile"))
+    g.createFile = wresolve.Symbol(k32, __hash("CreateFileA"))
+    if g.createPipe == null {
         return "process: resolve failed"
     }
-    if g.create_process == null {
+    if g.createProcess == null {
         return "process: resolve failed"
     }
-    if g.wait_object == null {
+    if g.waitObject == null {
         return "process: resolve failed"
     }
-    if g.get_exit == null {
+    if g.getExit == null {
         return "process: resolve failed"
     }
-    if g.close_handle == null {
+    if g.closeHandle == null {
         return "process: resolve failed"
     }
-    if g.read_file == null {
+    if g.readFile == null {
         return "process: resolve failed"
     }
-    if g.write_file == null {
+    if g.writeFile == null {
         return "process: resolve failed"
     }
     g.ready = 1
@@ -263,7 +263,7 @@ fn ensure_windows() -> *u8 {
 
 // ---------- low-level I/O on handles ----------
 
-fn write_handle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
+fn writeHandle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     if h == INVALID {
         return 0, "process: bad handle"
     }
@@ -278,14 +278,14 @@ fn write_handle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
         return cast[u64](rc), 0
     }
     var got: u32 = 0
-    var f: FnWriteFile = cast[FnWriteFile](g.write_file)
+    var f: FnWriteFile = cast[FnWriteFile](g.writeFile)
     if f(h, cast[PVOID](buf), cast[u32](n), &got, null) == 0 {
         return 0, "process: write failed"
     }
     return cast[u64](got), 0
 }
 
-fn read_handle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
+fn readHandle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     if h == INVALID {
         return 0, "process: bad handle"
     }
@@ -300,14 +300,14 @@ fn read_handle(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
         return cast[u64](rc), 0
     }
     var got: u32 = 0
-    var f: FnReadFile = cast[FnReadFile](g.read_file)
+    var f: FnReadFile = cast[FnReadFile](g.readFile)
     if f(h, cast[PVOID](buf), cast[u32](n), &got, null) == 0 {
         return 0, "process: read failed"
     }
     return cast[u64](got), 0
 }
 
-fn close_handle(h: Handle) {
+fn closeHandle(h: Handle) {
     if h == INVALID {
         return
     }
@@ -315,36 +315,36 @@ fn close_handle(h: Handle) {
         __syscall(SYS_CLOSE, h)
         return
     }
-    if g.close_handle != null {
-        var f: FnCloseHandle = cast[FnCloseHandle](g.close_handle)
+    if g.closeHandle != null {
+        var f: FnCloseHandle = cast[FnCloseHandle](g.closeHandle)
         f(h)
     }
 }
 
 // WriteStdin writes to the child's stdin pipe (parent side).
 fn WriteStdin(c: *Cmd, buf: *u8, n: u64) -> (u64, *u8) {
-    return write_handle(c.stdin_w, buf, n)
+    return writeHandle(c.stdinW, buf, n)
 }
 
 // ReadStdout reads from the child's stdout pipe.
 fn ReadStdout(c: *Cmd, buf: *u8, n: u64) -> (u64, *u8) {
-    return read_handle(c.stdout_r, buf, n)
+    return readHandle(c.stdoutR, buf, n)
 }
 
 // ReadStderr reads from the child's stderr pipe.
 fn ReadStderr(c: *Cmd, buf: *u8, n: u64) -> (u64, *u8) {
-    return read_handle(c.stderr_r, buf, n)
+    return readHandle(c.stderrR, buf, n)
 }
 
 // CloseStdin closes the parent write end of stdin (signals EOF to child).
 fn CloseStdin(c: *Cmd) {
-    close_handle(c.stdin_w)
-    c.stdin_w = INVALID
+    closeHandle(c.stdinW)
+    c.stdinW = INVALID
 }
 
 // ---------- pipe helpers ----------
 
-fn make_pipe_linux(r: *Handle, w: *Handle) -> *u8 {
+fn makePipeLinux(r: *Handle, w: *Handle) -> *u8 {
     var pfd: [8]u8
     var i: u64 = 0
     while i < 8 {
@@ -360,7 +360,7 @@ fn make_pipe_linux(r: *Handle, w: *Handle) -> *u8 {
 }
 
 // SECURITY_ATTRIBUTES: nLength@0, lpSecurityDescriptor@8, bInheritHandle@16 → size 24
-fn make_pipe_windows(r: *Handle, w: *Handle) -> *u8 {
+fn makePipeWindows(r: *Handle, w: *Handle) -> *u8 {
     var sa: [24]u8
     var i: u64 = 0
     while i < 24 {
@@ -371,7 +371,7 @@ fn make_pipe_windows(r: *Handle, w: *Handle) -> *u8 {
     __store32(cast[*void](&sa[0] + 16), 1) // bInheritHandle = TRUE
     var rh: Handle = 0
     var wh: Handle = 0
-    var f: FnCreatePipe = cast[FnCreatePipe](g.create_pipe)
+    var f: FnCreatePipe = cast[FnCreatePipe](g.createPipe)
     if f(cast[PVOID](&rh), cast[PVOID](&wh), cast[PVOID](&sa[0]), 0) == 0 {
         return "process: pipe failed"
     }
@@ -380,21 +380,21 @@ fn make_pipe_windows(r: *Handle, w: *Handle) -> *u8 {
     return 0
 }
 
-fn make_pipe(r: *Handle, w: *Handle) -> *u8 {
+fn makePipe(r: *Handle, w: *Handle) -> *u8 {
     if runtime.IsLinux() {
-        return make_pipe_linux(r, w)
+        return makePipeLinux(r, w)
     }
-    return make_pipe_windows(r, w)
+    return makePipeWindows(r, w)
 }
 
-fn noinherit_windows(h: Handle) {
-    if g.set_handle_info == null {
+fn noinheritWindows(h: Handle) {
+    if g.setHandleInfo == null {
         return
     }
     if h == INVALID {
         return
     }
-    var f: FnSetHandleInformation = cast[FnSetHandleInformation](g.set_handle_info)
+    var f: FnSetHandleInformation = cast[FnSetHandleInformation](g.setHandleInfo)
     f(h, W_HANDLE_FLAG_INHERIT, 0)
 }
 
@@ -415,61 +415,61 @@ fn Start(c: *Cmd) -> *u8 {
         }
     }
     if runtime.IsLinux() {
-        return start_linux(c)
+        return startLinux(c)
     }
     if runtime.IsWindows() {
-        return start_windows(c)
+        return startWindows(c)
     }
     return "process: unknown os"
 }
 
-// touch_cstr forces string decryption before fork (PIC encrypted rdata).
-fn touch_cstr(s: *u8) {
+// touchCstr forces string decryption before fork (PIC encrypted rdata).
+fn touchCstr(s: *u8) {
     if s != null {
         __strlen(s)
     }
 }
 
-fn touch_cmd_strings(c: *Cmd) {
-    touch_cstr(c.program)
-    touch_cstr(c.dir)
-    touch_cstr(c.cmdline)
+fn touchCmdStrings(c: *Cmd) {
+    touchCstr(c.program)
+    touchCstr(c.dir)
+    touchCstr(c.cmdline)
     if c.argv != null {
         var p: **u8 = c.argv
         while *p != null {
-            touch_cstr(*p)
+            touchCstr(*p)
             p = cast[**u8](cast[u64](p) + 8)
         }
     }
     if c.env != null {
         var e: **u8 = c.env
         while *e != null {
-            touch_cstr(*e)
+            touchCstr(*e)
             e = cast[**u8](cast[u64](e) + 8)
         }
     }
 }
 
-fn start_linux(c: *Cmd) -> *u8 {
+fn startLinux(c: *Cmd) -> *u8 {
     // Decrypt all path/argv/env strings in the parent before fork+CoW.
-    touch_cmd_strings(c)
+    touchCmdStrings(c)
     var err: *u8 = 0
     // setup pipes
-    if c.stdin_mode == STD_PIPE {
-        err = make_pipe(&c._in_r, &c.stdin_w)
+    if c.stdinMode == STD_PIPE {
+        err = makePipe(&c._in_r, &c.stdinW)
         if err != 0 {
             return err
         }
     }
-    if c.stdout_mode == STD_PIPE {
-        err = make_pipe(&c.stdout_r, &c._out_w)
+    if c.stdoutMode == STD_PIPE {
+        err = makePipe(&c.stdoutR, &c._out_w)
         if err != 0 {
             Release(c)
             return err
         }
     }
-    if c.stderr_mode == STD_PIPE {
-        err = make_pipe(&c.stderr_r, &c._err_w)
+    if c.stderrMode == STD_PIPE {
+        err = makePipe(&c.stderrR, &c._err_w)
         if err != 0 {
             Release(c)
             return err
@@ -489,10 +489,10 @@ fn start_linux(c: *Cmd) -> *u8 {
             }
         }
         // stdin
-        if c.stdin_mode == STD_PIPE {
+        if c.stdinMode == STD_PIPE {
             __syscall(SYS_DUP2, c._in_r, 0)
         } else {
-            if c.stdin_mode == STD_NULL {
+            if c.stdinMode == STD_NULL {
                 var dn: *u8 = "/dev/null"
                 var nfd: i64 = cast[i64](__syscall(SYS_OPEN, cast[u64](dn), O_RDONLY, 0))
                 if nfd >= 0 {
@@ -502,10 +502,10 @@ fn start_linux(c: *Cmd) -> *u8 {
             }
         }
         // stdout
-        if c.stdout_mode == STD_PIPE {
+        if c.stdoutMode == STD_PIPE {
             __syscall(SYS_DUP2, c._out_w, 1)
         } else {
-            if c.stdout_mode == STD_NULL {
+            if c.stdoutMode == STD_NULL {
                 var dn2: *u8 = "/dev/null"
                 var nfd2: i64 = cast[i64](__syscall(SYS_OPEN, cast[u64](dn2), O_WRONLY, 0))
                 if nfd2 >= 0 {
@@ -515,10 +515,10 @@ fn start_linux(c: *Cmd) -> *u8 {
             }
         }
         // stderr
-        if c.stderr_mode == STD_PIPE {
+        if c.stderrMode == STD_PIPE {
             __syscall(SYS_DUP2, c._err_w, 2)
         } else {
-            if c.stderr_mode == STD_NULL {
+            if c.stderrMode == STD_NULL {
                 var dn3: *u8 = "/dev/null"
                 var nfd3: i64 = cast[i64](__syscall(SYS_OPEN, cast[u64](dn3), O_WRONLY, 0))
                 if nfd3 >= 0 {
@@ -531,17 +531,17 @@ fn start_linux(c: *Cmd) -> *u8 {
         if c._in_r != INVALID {
             __syscall(SYS_CLOSE, c._in_r)
         }
-        if c.stdin_w != INVALID {
-            __syscall(SYS_CLOSE, c.stdin_w)
+        if c.stdinW != INVALID {
+            __syscall(SYS_CLOSE, c.stdinW)
         }
-        if c.stdout_r != INVALID {
-            __syscall(SYS_CLOSE, c.stdout_r)
+        if c.stdoutR != INVALID {
+            __syscall(SYS_CLOSE, c.stdoutR)
         }
         if c._out_w != INVALID {
             __syscall(SYS_CLOSE, c._out_w)
         }
-        if c.stderr_r != INVALID {
-            __syscall(SYS_CLOSE, c.stderr_r)
+        if c.stderrR != INVALID {
+            __syscall(SYS_CLOSE, c.stderrR)
         }
         if c._err_w != INVALID {
             __syscall(SYS_CLOSE, c._err_w)
@@ -574,46 +574,46 @@ fn start_linux(c: *Cmd) -> *u8 {
     c.started = 1
     // close child ends
     if c._in_r != INVALID {
-        close_handle(c._in_r)
+        closeHandle(c._in_r)
         c._in_r = INVALID
     }
     if c._out_w != INVALID {
-        close_handle(c._out_w)
+        closeHandle(c._out_w)
         c._out_w = INVALID
     }
     if c._err_w != INVALID {
-        close_handle(c._err_w)
+        closeHandle(c._err_w)
         c._err_w = INVALID
     }
     return 0
 }
 
 // STARTUPINFOA size 104; PROCESS_INFORMATION size 24 on x64
-fn start_windows(c: *Cmd) -> *u8 {
-    touch_cmd_strings(c)
+fn startWindows(c: *Cmd) -> *u8 {
+    touchCmdStrings(c)
     var err: *u8 = 0
-    if c.stdin_mode == STD_PIPE {
-        err = make_pipe(&c._in_r, &c.stdin_w)
+    if c.stdinMode == STD_PIPE {
+        err = makePipe(&c._in_r, &c.stdinW)
         if err != 0 {
             return err
         }
-        noinherit_windows(c.stdin_w)
+        noinheritWindows(c.stdinW)
     }
-    if c.stdout_mode == STD_PIPE {
-        err = make_pipe(&c.stdout_r, &c._out_w)
+    if c.stdoutMode == STD_PIPE {
+        err = makePipe(&c.stdoutR, &c._out_w)
         if err != 0 {
             Release(c)
             return err
         }
-        noinherit_windows(c.stdout_r)
+        noinheritWindows(c.stdoutR)
     }
-    if c.stderr_mode == STD_PIPE {
-        err = make_pipe(&c.stderr_r, &c._err_w)
+    if c.stderrMode == STD_PIPE {
+        err = makePipe(&c.stderrR, &c._err_w)
         if err != 0 {
             Release(c)
             return err
         }
-        noinherit_windows(c.stderr_r)
+        noinheritWindows(c.stderrR)
     }
 
     // STARTUPINFOA (104 bytes)
@@ -625,20 +625,20 @@ fn start_windows(c: *Cmd) -> *u8 {
     }
     __store32(cast[*void](&si[0]), 104) // cb
     var flags: u32 = 0
-    if c.stdin_mode == STD_PIPE {
+    if c.stdinMode == STD_PIPE {
         flags = flags + W_STARTF_USESTDHANDLES
         __store64(cast[*void](&si[0] + 80), c._in_r) // hStdInput @ 0x50
     }
-    if c.stdout_mode == STD_PIPE {
+    if c.stdoutMode == STD_PIPE {
         flags = flags + W_STARTF_USESTDHANDLES
         __store64(cast[*void](&si[0] + 88), c._out_w)
     }
-    if c.stderr_mode == STD_PIPE {
+    if c.stderrMode == STD_PIPE {
         flags = flags + W_STARTF_USESTDHANDLES
         __store64(cast[*void](&si[0] + 96), c._err_w)
     }
     // If only some pipes, fill inherit for others from GetStdHandle? Skip - require consistent.
-    if c.hide_window != 0 {
+    if c.hideWindow != 0 {
         flags = flags + W_STARTF_USESHOWWINDOW
         __store16(cast[*void](&si[0] + 64), cast[u64](W_SW_HIDE))
     }
@@ -654,73 +654,73 @@ fn start_windows(c: *Cmd) -> *u8 {
 
     // Command line: mutable buffer required by CreateProcessA
     var cl: *u8 = c.cmdline
-    var cl_owned: *u8 = null
+    var clOwned: *u8 = null
     if cl == null {
-        cl_owned, err = build_cmdline(c)
+        clOwned, err = buildCmdline(c)
         if err != 0 {
             Release(c)
             return err
         }
-        cl = cl_owned
+        cl = clOwned
     }
 
     // Environment block (optional)
-    var env_block: PVOID = null
-    var env_owned: *u8 = null
+    var envBlock: PVOID = null
+    var envOwned: *u8 = null
     if c.env != null {
-        env_owned, err = build_env_block(c.env)
+        envOwned, err = buildEnvBlock(c.env)
         if err != 0 {
-            if cl_owned != null {
-                runtime.Free(cast[*void](cl_owned))
+            if clOwned != null {
+                runtime.Free(cast[*void](clOwned))
             }
             Release(c)
             return err
         }
-        env_block = cast[PVOID](env_owned)
+        envBlock = cast[PVOID](envOwned)
     }
 
     var app: *u8 = c.program
     var creation: u32 = 0
-    if c.hide_window != 0 {
+    if c.hideWindow != 0 {
         creation = W_CREATE_NO_WINDOW
     }
 
-    var f: FnCreateProcessA = cast[FnCreateProcessA](g.create_process)
-    var ok: u32 = f(app, cl, null, null, 1, creation, env_block, c.dir, cast[PVOID](&si[0]), cast[PVOID](&pi[0]))
-    if cl_owned != null {
-        runtime.Free(cast[*void](cl_owned))
+    var f: FnCreateProcessA = cast[FnCreateProcessA](g.createProcess)
+    var ok: u32 = f(app, cl, null, null, 1, creation, envBlock, c.dir, cast[PVOID](&si[0]), cast[PVOID](&pi[0]))
+    if clOwned != null {
+        runtime.Free(cast[*void](clOwned))
     }
-    if env_owned != null {
-        runtime.Free(cast[*void](env_owned))
+    if envOwned != null {
+        runtime.Free(cast[*void](envOwned))
     }
     if ok == 0 {
         Release(c)
         return "process: create failed"
     }
 
-    c.h_process = __load64(cast[*void](&pi[0]))
-    c.h_thread = __load64(cast[*void](&pi[0] + 8))
+    c.hProcess = __load64(cast[*void](&pi[0]))
+    c.hThread = __load64(cast[*void](&pi[0] + 8))
     c.pid = cast[u64](__load32(cast[*void](&pi[0] + 16)))
     c.started = 1
 
     // close child pipe ends in parent
     if c._in_r != INVALID {
-        close_handle(c._in_r)
+        closeHandle(c._in_r)
         c._in_r = INVALID
     }
     if c._out_w != INVALID {
-        close_handle(c._out_w)
+        closeHandle(c._out_w)
         c._out_w = INVALID
     }
     if c._err_w != INVALID {
-        close_handle(c._err_w)
+        closeHandle(c._err_w)
         c._err_w = INVALID
     }
     return 0
 }
 
-// build_cmdline joins argv into a Windows command line (allocates; caller frees).
-fn build_cmdline(c: *Cmd) -> (*u8, *u8) {
+// buildCmdline joins argv into a Windows command line (allocates; caller frees).
+fn buildCmdline(c: *Cmd) -> (*u8, *u8) {
     // rough size
     var n: u64 = 0
     if c.argv != null {
@@ -756,15 +756,15 @@ fn build_cmdline(c: *Cmd) -> (*u8, *u8) {
             first = 0
             // simple quote if space present
             var s: *u8 = *p2
-            var need_q: u64 = 0
+            var needQ: u64 = 0
             var j: u64 = 0
             while *(s + j) != 0 {
                 if *(s + j) == 32 {
-                    need_q = 1
+                    needQ = 1
                 }
                 j = j + 1
             }
-            if need_q != 0 {
+            if needQ != 0 {
                 *(out + di) = 34
                 di = di + 1
             }
@@ -774,7 +774,7 @@ fn build_cmdline(c: *Cmd) -> (*u8, *u8) {
                 di = di + 1
                 j = j + 1
             }
-            if need_q != 0 {
+            if needQ != 0 {
                 *(out + di) = 34
                 di = di + 1
             }
@@ -795,8 +795,8 @@ fn build_cmdline(c: *Cmd) -> (*u8, *u8) {
     return out, 0
 }
 
-// build_env_block builds Windows environment block from envp (double-NUL terminated).
-fn build_env_block(env: **u8) -> (*u8, *u8) {
+// buildEnvBlock builds Windows environment block from envp (double-NUL terminated).
+fn buildEnvBlock(env: **u8) -> (*u8, *u8) {
     var n: u64 = 2
     var p: **u8 = env
     while *p != null {
@@ -828,13 +828,13 @@ fn build_env_block(env: **u8) -> (*u8, *u8) {
     return out, 0
 }
 
-// Wait waits for the process to exit. Returns (exit_code, err).
+// Wait waits for the process to exit. Returns (exitCode, err).
 fn Wait(c: *Cmd) -> (i32, *u8) {
     if c.started == 0 {
         return -1, "process: not started"
     }
     if c.waited != 0 {
-        return c.exit_code, 0
+        return c.exitCode, 0
     }
     if runtime.IsLinux() {
         var st: u64 = 0
@@ -844,26 +844,26 @@ fn Wait(c: *Cmd) -> (i32, *u8) {
         }
         // WIFEXITED: (st & 0x7f) == 0
         if (st & 0x7f) == 0 {
-            c.exit_code = cast[i32]((st >> 8) & 0xff)
+            c.exitCode = cast[i32]((st >> 8) & 0xff)
         } else {
-            c.exit_code = -1
+            c.exitCode = -1
         }
         c.waited = 1
-        return c.exit_code, 0
+        return c.exitCode, 0
     }
     if runtime.IsWindows() {
-        var wf: FnWaitForSingleObject = cast[FnWaitForSingleObject](g.wait_object)
-        if wf(c.h_process, W_INFINITE) != W_WAIT_OBJECT_0 {
+        var wf: FnWaitForSingleObject = cast[FnWaitForSingleObject](g.waitObject)
+        if wf(c.hProcess, W_INFINITE) != W_WAIT_OBJECT_0 {
             return -1, "process: wait failed"
         }
         var code: u32 = 0
-        var ge: FnGetExitCodeProcess = cast[FnGetExitCodeProcess](g.get_exit)
-        if ge(c.h_process, &code) == 0 {
+        var ge: FnGetExitCodeProcess = cast[FnGetExitCodeProcess](g.getExit)
+        if ge(c.hProcess, &code) == 0 {
             return -1, "process: exit code failed"
         }
-        c.exit_code = cast[i32](code)
+        c.exitCode = cast[i32](code)
         c.waited = 1
-        return c.exit_code, 0
+        return c.exitCode, 0
     }
     return -1, "process: unknown os"
 }
@@ -884,7 +884,7 @@ fn Kill(c: *Cmd) -> *u8 {
             return "process: resolve failed"
         }
         var f: FnTerminateProcess = cast[FnTerminateProcess](g.terminate)
-        if f(c.h_process, 1) == 0 {
+        if f(c.hProcess, 1) == 0 {
             return "process: kill failed"
         }
         return 0
@@ -895,29 +895,29 @@ fn Kill(c: *Cmd) -> *u8 {
 // Release closes pipes and Windows handles. Safe to call multiple times.
 // Does not wait or kill; call Wait first if needed.
 fn Release(c: *Cmd) {
-    close_handle(c.stdin_w)
-    c.stdin_w = INVALID
-    close_handle(c.stdout_r)
-    c.stdout_r = INVALID
-    close_handle(c.stderr_r)
-    c.stderr_r = INVALID
-    close_handle(c._in_r)
+    closeHandle(c.stdinW)
+    c.stdinW = INVALID
+    closeHandle(c.stdoutR)
+    c.stdoutR = INVALID
+    closeHandle(c.stderrR)
+    c.stderrR = INVALID
+    closeHandle(c._in_r)
     c._in_r = INVALID
-    close_handle(c._out_w)
+    closeHandle(c._out_w)
     c._out_w = INVALID
-    close_handle(c._err_w)
+    closeHandle(c._err_w)
     c._err_w = INVALID
     if runtime.IsWindows() {
-        close_handle(c.h_thread)
-        c.h_thread = INVALID
-        close_handle(c.h_process)
-        c.h_process = INVALID
+        closeHandle(c.hThread)
+        c.hThread = INVALID
+        closeHandle(c.hProcess)
+        c.hProcess = INVALID
     }
 }
 
 // ---------- high-level ----------
 
-// Run starts and waits with current config. Returns (exit_code, err).
+// Run starts and waits with current config. Returns (exitCode, err).
 fn Run(c: *Cmd) -> (i32, *u8) {
     var err: *u8 = Start(c)
     if err != 0 {
@@ -929,8 +929,8 @@ fn Run(c: *Cmd) -> (i32, *u8) {
     return code, err
 }
 
-// read_all_from reads a handle to EOF into an owning []u8.
-fn read_all_from(h: Handle) -> ([]u8, *u8) {
+// readAllFrom reads a handle to EOF into an owning []u8.
+fn readAllFrom(h: Handle) -> ([]u8, *u8) {
     var empty: []u8 = make([]u8, 0, 0)
     if h == INVALID {
         return empty, 0
@@ -940,7 +940,7 @@ fn read_all_from(h: Handle) -> ([]u8, *u8) {
     while 1 {
         var n: u64
         var err: *u8
-        n, err = read_handle(h, &chunk[0], 4096)
+        n, err = readHandle(h, &chunk[0], 4096)
         if err != 0 {
             free(s)
             return empty, err
@@ -962,10 +962,10 @@ fn read_all_from(h: Handle) -> ([]u8, *u8) {
 }
 
 // Output runs c with stdout piped (stderr inherit unless already set to pipe).
-// Returns stdout bytes; exit code in c.exit_code. Caller free(data).
+// Returns stdout bytes; exit code in c.exitCode. Caller free(data).
 fn Output(c: *Cmd) -> ([]u8, *u8) {
     var empty: []u8 = make([]u8, 0, 0)
-    c.stdout_mode = STD_PIPE
+    c.stdoutMode = STD_PIPE
     var err: *u8 = Start(c)
     if err != 0 {
         return empty, err
@@ -973,7 +973,7 @@ fn Output(c: *Cmd) -> ([]u8, *u8) {
     // close stdin if we opened a pipe unused
     CloseStdin(c)
     var data: []u8
-    data, err = read_all_from(c.stdout_r)
+    data, err = readAllFrom(c.stdoutR)
     if err != 0 {
         Kill(c)
         Wait(c)
@@ -982,7 +982,7 @@ fn Output(c: *Cmd) -> ([]u8, *u8) {
     }
     var code: i32
     code, err = Wait(c)
-    c.exit_code = code
+    c.exitCode = code
     Release(c)
     if err != 0 {
         free(data)
@@ -995,8 +995,8 @@ fn Output(c: *Cmd) -> ([]u8, *u8) {
 // on Windows both handles set to the same write pipe).
 fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     var empty: []u8 = make([]u8, 0, 0)
-    c.stdout_mode = STD_PIPE
-    c.stderr_mode = STD_PIPE
+    c.stdoutMode = STD_PIPE
+    c.stderrMode = STD_PIPE
     // We'll merge by reading both - simpler portable approach:
     var err: *u8 = Start(c)
     if err != 0 {
@@ -1005,7 +1005,7 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     CloseStdin(c)
     // read stdout fully first then stderr (fine for moderate output)
     var out: []u8
-    out, err = read_all_from(c.stdout_r)
+    out, err = readAllFrom(c.stdoutR)
     if err != 0 {
         Kill(c)
         Wait(c)
@@ -1013,7 +1013,7 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
         return empty, err
     }
     var errb: []u8
-    errb, err = read_all_from(c.stderr_r)
+    errb, err = readAllFrom(c.stderrR)
     if err != 0 {
         free(out)
         Kill(c)
@@ -1030,7 +1030,7 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     free(errb)
     var code: i32
     code, err = Wait(c)
-    c.exit_code = code
+    c.exitCode = code
     Release(c)
     if err != 0 {
         free(out)
@@ -1046,28 +1046,28 @@ fn Shell(line: *u8) -> (i32, *u8) {
     if line == null {
         return -1, "process: null command"
     }
-    return run_shell_line(line, 0)
+    return runShellLine(line, 0)
 }
 
-// run_shell_line kind: 0=sh/cmd 1=bash 2=powershell
+// runShellLine kind: 0=sh/cmd 1=bash 2=powershell
 // Argv storage is embedded in Cmd so it outlives helper frames across fork.
-fn run_shell_line(line: *u8, kind: u64) -> (i32, *u8) {
+fn runShellLine(line: *u8, kind: u64) -> (i32, *u8) {
     var c: Cmd
     Zero(&c)
-    c.hide_window = 1
+    c.hideWindow = 1
 
     if runtime.IsWindows() {
         var errw: *u8 = 0
         if kind == 2 {
             c.program = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-            errw = win_cmdline(&c, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ", line)
+            errw = winCmdline(&c, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ", line)
         } else {
             if kind == 1 {
                 c.program = "bash.exe"
-                errw = win_cmdline(&c, "bash.exe -c ", line)
+                errw = winCmdline(&c, "bash.exe -c ", line)
             } else {
                 c.program = "C:\\Windows\\System32\\cmd.exe"
-                errw = win_cmdline(&c, "cmd.exe /c ", line)
+                errw = winCmdline(&c, "cmd.exe /c ", line)
             }
         }
         if errw != 0 {
@@ -1108,51 +1108,51 @@ fn run_shell_line(line: *u8, kind: u64) -> (i32, *u8) {
 
 // ShellOutput runs via shell and captures stdout.
 fn ShellOutput(line: *u8) -> ([]u8, *u8) {
-    return run_shell_output(line, 0)
+    return runShellOutput(line, 0)
 }
 
 // Bash runs via /bin/bash -c (Linux) or bash.exe -c (Windows if present).
 fn Bash(line: *u8) -> (i32, *u8) {
-    return run_shell_line(line, 1)
+    return runShellLine(line, 1)
 }
 
 // BashOutput captures stdout from bash -c.
 fn BashOutput(line: *u8) -> ([]u8, *u8) {
-    return run_shell_output(line, 1)
+    return runShellOutput(line, 1)
 }
 
 // PowerShell runs via powershell.exe -NoProfile -NonInteractive -Command (Windows),
 // or pwsh -NonInteractive -Command when available on Linux.
 fn PowerShell(line: *u8) -> (i32, *u8) {
-    return run_shell_line(line, 2)
+    return runShellLine(line, 2)
 }
 
 // PowerShellOutput captures stdout from PowerShell.
 fn PowerShellOutput(line: *u8) -> ([]u8, *u8) {
-    return run_shell_output(line, 2)
+    return runShellOutput(line, 2)
 }
 
-// run_shell_output is Output() after configuring a shell line.
-fn run_shell_output(line: *u8, kind: u64) -> ([]u8, *u8) {
+// runShellOutput is Output() after configuring a shell line.
+fn runShellOutput(line: *u8, kind: u64) -> ([]u8, *u8) {
     var empty: []u8 = make([]u8, 0, 0)
     if line == null {
         return empty, "process: null command"
     }
     var c: Cmd
     Zero(&c)
-    c.hide_window = 1
+    c.hideWindow = 1
     if runtime.IsWindows() {
         var errw: *u8 = 0
         if kind == 2 {
             c.program = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
-            errw = win_cmdline(&c, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ", line)
+            errw = winCmdline(&c, "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ", line)
         } else {
             if kind == 1 {
                 c.program = "bash.exe"
-                errw = win_cmdline(&c, "bash.exe -c ", line)
+                errw = winCmdline(&c, "bash.exe -c ", line)
             } else {
                 c.program = "C:\\Windows\\System32\\cmd.exe"
-                errw = win_cmdline(&c, "cmd.exe /c ", line)
+                errw = winCmdline(&c, "cmd.exe /c ", line)
             }
         }
         if errw != 0 {
@@ -1195,7 +1195,7 @@ fn run_shell_output(line: *u8, kind: u64) -> ([]u8, *u8) {
     return data, err
 }
 
-fn win_cmdline(c: *Cmd, prefix: *u8, line: *u8) -> *u8 {
+fn winCmdline(c: *Cmd, prefix: *u8, line: *u8) -> *u8 {
     var n: u64 = __strlen(prefix) + __strlen(line) + 4
     var raw: *void
     var err: *u8

@@ -16,7 +16,7 @@ fn Separator() -> u8 {
     return 47 // '/'
 }
 
-fn is_sep(c: u8) -> bool {
+fn isSep(c: u8) -> bool {
     if c == 47 {
         return true
     }
@@ -33,7 +33,7 @@ fn strlen(s: *u8) -> u64 {
     return __strlen(s)
 }
 
-fn alloc_copy(s: *u8, n: u64) -> (*u8, *u8) {
+fn allocCopy(s: *u8, n: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
@@ -78,7 +78,7 @@ fn IsAbs(p: *u8) -> bool {
         }
         if letter != 0 {
             if *(p + 1) == 58 {
-                if is_sep(*(p + 2)) {
+                if isSep(*(p + 2)) {
                     return true
                 }
             }
@@ -91,15 +91,15 @@ fn IsAbs(p: *u8) -> bool {
 // Base returns the last path element (new heap string).
 fn Base(p: *u8) -> (*u8, *u8) {
     if p == null {
-        return alloc_copy(cast[*u8](null), 0)
+        return allocCopy(cast[*u8](null), 0)
     }
     var n: u64 = strlen(p)
     if n == 0 {
-        return alloc_copy(p, 0)
+        return allocCopy(p, 0)
     }
     // strip trailing seps
     while n > 0 {
-        if !is_sep(*(p + n - 1)) {
+        if !isSep(*(p + n - 1)) {
             break
         }
         n = n - 1
@@ -110,57 +110,57 @@ fn Base(p: *u8) -> (*u8, *u8) {
         var one: [2]u8
         one[0] = sep
         one[1] = 0
-        return alloc_copy(&one[0], 1)
+        return allocCopy(&one[0], 1)
     }
     var i: u64 = n
     while i > 0 {
-        if is_sep(*(p + i - 1)) {
-            return alloc_copy(p + i, n - i)
+        if isSep(*(p + i - 1)) {
+            return allocCopy(p + i, n - i)
         }
         i = i - 1
     }
-    return alloc_copy(p, n)
+    return allocCopy(p, n)
 }
 
 // Dir returns all but the last element (new heap string).
 fn Dir(p: *u8) -> (*u8, *u8) {
     if p == null {
-        return alloc_copy(cast[*u8](null), 0)
+        return allocCopy(cast[*u8](null), 0)
     }
     var n: u64 = strlen(p)
     if n == 0 {
         var dot: [2]u8
         dot[0] = 46
         dot[1] = 0
-        return alloc_copy(&dot[0], 1)
+        return allocCopy(&dot[0], 1)
     }
     while n > 0 {
-        if !is_sep(*(p + n - 1)) {
+        if !isSep(*(p + n - 1)) {
             break
         }
         n = n - 1
     }
     var i: u64 = n
     while i > 0 {
-        if is_sep(*(p + i - 1)) {
+        if isSep(*(p + i - 1)) {
             // keep trailing sep for root "/"
             if i == 1 {
-                return alloc_copy(p, 1)
+                return allocCopy(p, 1)
             }
             // Windows root "C:\"
             if i == 3 {
                 if *(p + 1) == 58 {
-                    return alloc_copy(p, 3)
+                    return allocCopy(p, 3)
                 }
             }
-            return alloc_copy(p, i - 1)
+            return allocCopy(p, i - 1)
         }
         i = i - 1
     }
     var dot2: [2]u8
     dot2[0] = 46
     dot2[1] = 0
-    return alloc_copy(&dot2[0], 1)
+    return allocCopy(&dot2[0], 1)
 }
 
 // Ext returns the extension including dot, or empty string.
@@ -177,17 +177,17 @@ fn Ext(p: *u8) -> (*u8, *u8) {
         var c: u8 = *(base + i - 1)
         if c == 46 {
             var out: *u8
-            out, err = alloc_copy(base + i - 1, n - (i - 1))
+            out, err = allocCopy(base + i - 1, n - (i - 1))
             runtime.Free(cast[*void](base))
             return out, err
         }
-        if is_sep(c) {
+        if isSep(c) {
             break
         }
         i = i - 1
     }
     runtime.Free(cast[*void](base))
-    return alloc_copy(cast[*u8](null), 0)
+    return allocCopy(cast[*u8](null), 0)
 }
 
 // Join joins a and b with the OS separator (new heap string).
@@ -195,20 +195,20 @@ fn Join(a: *u8, b: *u8) -> (*u8, *u8) {
     var na: u64 = strlen(a)
     var nb: u64 = strlen(b)
     if na == 0 {
-        return alloc_copy(b, nb)
+        return allocCopy(b, nb)
     }
     if nb == 0 {
-        return alloc_copy(a, na)
+        return allocCopy(a, na)
     }
     // if b is abs, return b
     if IsAbs(b) {
-        return alloc_copy(b, nb)
+        return allocCopy(b, nb)
     }
-    var need_sep: u64 = 1
-    if is_sep(*(a + na - 1)) {
-        need_sep = 0
+    var needSep: u64 = 1
+    if isSep(*(a + na - 1)) {
+        needSep = 0
     }
-    var total: u64 = na + need_sep + nb
+    var total: u64 = na + needSep + nb
     if total > MAX_PATH {
         return null, "path: too long"
     }
@@ -221,7 +221,7 @@ fn Join(a: *u8, b: *u8) -> (*u8, *u8) {
     var out: *u8 = cast[*u8](raw)
     mem.Copy(cast[*void](out), cast[*void](a), na)
     var di: u64 = na
-    if need_sep != 0 {
+    if needSep != 0 {
         *(out + di) = Separator()
         di = di + 1
     }
@@ -233,14 +233,14 @@ fn Join(a: *u8, b: *u8) -> (*u8, *u8) {
 // Clean collapses repeated separators and trailing sep (except root). Light clean.
 fn Clean(p: *u8) -> (*u8, *u8) {
     if p == null {
-        return alloc_copy(cast[*u8](null), 0)
+        return allocCopy(cast[*u8](null), 0)
     }
     var n: u64 = strlen(p)
     if n == 0 {
         var dot: [2]u8
         dot[0] = 46
         dot[1] = 0
-        return alloc_copy(&dot[0], 1)
+        return allocCopy(&dot[0], 1)
     }
     if n > MAX_PATH {
         return null, "path: too long"
@@ -254,19 +254,19 @@ fn Clean(p: *u8) -> (*u8, *u8) {
     var out: *u8 = cast[*u8](raw)
     var di: u64 = 0
     var i: u64 = 0
-    var last_sep: u64 = 0
+    var lastSep: u64 = 0
     while i < n {
         var c: u8 = *(p + i)
-        if is_sep(c) {
+        if isSep(c) {
             // normalize to Separator()
             c = Separator()
-            if last_sep != 0 && di > 0 {
+            if lastSep != 0 && di > 0 {
                 i = i + 1
                 continue
             }
-            last_sep = 1
+            lastSep = 1
         } else {
-            last_sep = 0
+            lastSep = 0
         }
         *(out + di) = c
         di = di + 1
@@ -274,7 +274,7 @@ fn Clean(p: *u8) -> (*u8, *u8) {
     }
     // strip trailing sep unless root
     if di > 1 {
-        if is_sep(*(out + di - 1)) {
+        if isSep(*(out + di - 1)) {
             di = di - 1
         }
     }

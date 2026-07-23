@@ -1,8 +1,8 @@
-// net_http - GET DuckDuckGo and save the response body to a file.
+// netHttp - GET DuckDuckGo and save the response body to a file.
 //
-//   picc examples/net_http/main.pic -o http.bin -S
-//   ./harness/run_shellcode http.bin
-//   # writes: /tmp/piclang_duckduckgo.html
+//   picc examples/netHttp/main.pic -o http.bin -S
+//   ./harness/runShellcode http.bin
+//   # writes: /tmp/piclangDuckduckgo.html
 //
 // std/net speaks cleartext HTTP only (no TLS). DuckDuckGo answers http://
 // with a 301 HTML body pointing at https:// - that body is what gets saved.
@@ -20,8 +20,8 @@ import "std/runtime"
 import "std/net"
 import "std/file"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 1
     }
     if net.Init() != 0 {
@@ -29,7 +29,7 @@ fn main(stack_hint: *void) -> u64 {
     }
 
     var url: *u8 = "http://duckduckgo.com/"
-    var out_path: *u8 = "piclang_duckduckgo.html"
+    var outPath: *u8 = "piclang_duckduckgo.html"
 
     var resp: net.Response
     err := net.Get(url, &resp)
@@ -41,11 +41,11 @@ fn main(stack_hint: *void) -> u64 {
     if resp.body == null {
         return 4
     }
-    if resp.body_len == 0 {
+    if resp.bodyLen == 0 {
         return 4
     }
 
-    var werr: *u8 = file.WriteAll(out_path, resp.body, resp.body_len)
+    var werr: *u8 = file.WriteAll(outPath, resp.body, resp.bodyLen)
     if werr != 0 {
         return 5
     }

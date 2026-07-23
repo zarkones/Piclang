@@ -33,10 +33,10 @@ type FnQueryPerformanceFrequency = fn(*i64) -> u32
 struct State {
     ready: u64
     sleep: PVOID
-    get_filetime: PVOID
+    getFiletime: PVOID
     qpc: PVOID
     qpf: PVOID
-    qpf_val: i64
+    qpfVal: i64
 }
 
 var g: State
@@ -58,13 +58,13 @@ fn ensure() -> *u8 {
             return "time: resolve failed"
         }
         g.sleep = wresolve.Symbol(k32, __hash("Sleep"))
-        g.get_filetime = wresolve.Symbol(k32, __hash("GetSystemTimeAsFileTime"))
+        g.getFiletime = wresolve.Symbol(k32, __hash("GetSystemTimeAsFileTime"))
         g.qpc = wresolve.Symbol(k32, __hash("QueryPerformanceCounter"))
         g.qpf = wresolve.Symbol(k32, __hash("QueryPerformanceFrequency"))
         if g.sleep == null {
             return "time: resolve failed"
         }
-        if g.get_filetime == null {
+        if g.getFiletime == null {
             return "time: resolve failed"
         }
         if g.qpc != null {
@@ -72,7 +72,7 @@ fn ensure() -> *u8 {
                 var freq: i64 = 0
                 var f: FnQueryPerformanceFrequency = cast[FnQueryPerformanceFrequency](g.qpf)
                 if f(&freq) != 0 {
-                    g.qpf_val = freq
+                    g.qpfVal = freq
                 }
             }
         }
@@ -107,7 +107,7 @@ fn Sleep(d: Duration) -> *u8 {
         return 0
     }
     if runtime.IsLinux() {
-        // struct timespec { tv_sec i64; tv_nsec i64 }
+        // struct timespec { tvSec i64; tvNsec i64 }
         var ts: [16]u8
         var sec: i64 = d / Second
         var nsec: i64 = d % Second
@@ -162,7 +162,7 @@ fn Now() -> (i64, *u8) {
     if runtime.IsWindows() {
         // FILETIME 8 bytes
         var ft: [8]u8
-        var f: FnGetSystemTimeAsFileTime = cast[FnGetSystemTimeAsFileTime](g.get_filetime)
+        var f: FnGetSystemTimeAsFileTime = cast[FnGetSystemTimeAsFileTime](g.getFiletime)
         f(cast[PVOID](&ft[0]))
         var ticks: u64 = __load64(cast[*void](&ft[0]))
         if ticks < FILETIME_UNIX_DELTA {
@@ -192,7 +192,7 @@ fn Mono() -> (i64, *u8) {
         return Unix(sec, nsec), 0
     }
     if runtime.IsWindows() {
-        if g.qpc == null || g.qpf_val == 0 {
+        if g.qpc == null || g.qpfVal == 0 {
             // fallback: wall time
             return Now()
         }
@@ -202,19 +202,19 @@ fn Mono() -> (i64, *u8) {
             return 0, "time: clock failed"
         }
         // ns = counter * 1e9 / freq
-        var ns: i64 = (counter * Second) / g.qpf_val
+        var ns: i64 = (counter * Second) / g.qpfVal
         return ns, 0
     }
     return 0, "time: unknown os"
 }
 
-// Since returns Mono() - start_ns (0 on Mono error).
-fn Since(start_ns: i64) -> Duration {
+// Since returns Mono() - startNs (0 on Mono error).
+fn Since(startNs: i64) -> Duration {
     var now: i64
     var err: *u8
     now, err = Mono()
     if err != 0 {
         return 0
     }
-    return now - start_ns
+    return now - startNs
 }

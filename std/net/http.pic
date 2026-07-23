@@ -11,7 +11,7 @@ const HTTP_MAX_HDR: u64 = 65536
 struct Response {
     status: u32
     body: *u8
-    body_len: u64
+    bodyLen: u64
 }
 
 fn FreeResponse(r: *Response) {
@@ -22,7 +22,7 @@ fn FreeResponse(r: *Response) {
         runtime.Free(cast[*void](r.body))
         r.body = null
     }
-    r.body_len = 0
+    r.bodyLen = 0
     r.status = 0
 }
 
@@ -30,13 +30,13 @@ fn Get(url: *u8, resp: *Response) -> *u8 {
     return Do("GET", url, cast[**u8](0), cast[*u8](0), 0, resp)
 }
 
-fn Post(url: *u8, content_type: *u8, body: *u8, body_len: u64, resp: *Response) -> *u8 {
-    if content_type == null {
-        return Do("POST", url, cast[**u8](0), body, body_len, resp)
+fn Post(url: *u8, contentType: *u8, body: *u8, bodyLen: u64, resp: *Response) -> *u8 {
+    if contentType == null {
+        return Do("POST", url, cast[**u8](0), body, bodyLen, resp)
     }
     // single header line allocated
     var prefix: *u8 = "Content-Type: "
-    var n: u64 = __strlen(prefix) + __strlen(content_type)
+    var n: u64 = __strlen(prefix) + __strlen(contentType)
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
@@ -45,39 +45,39 @@ fn Post(url: *u8, content_type: *u8, body: *u8, body_len: u64, resp: *Response) 
     }
     var line: *u8 = cast[*u8](raw)
     mem.Copy(cast[*void](line), cast[*void](prefix), __strlen(prefix))
-    mem.Copy(cast[*void](line + __strlen(prefix)), cast[*void](content_type), __strlen(content_type) + 1)
+    mem.Copy(cast[*void](line + __strlen(prefix)), cast[*void](contentType), __strlen(contentType) + 1)
     var hdrs: [2]*u8
     hdrs[0] = line
     hdrs[1] = null
-    err = Do("POST", url, cast[**u8](&hdrs[0]), body, body_len, resp)
+    err = Do("POST", url, cast[**u8](&hdrs[0]), body, bodyLen, resp)
     runtime.Free(raw)
     return err
 }
 
 // Do performs method url with optional headers (**u8 null-terminated "K: V") and body.
-fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Response) -> *u8 {
+fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Response) -> *u8 {
     if resp == null {
         return "net: null response"
     }
     resp.status = 0
     resp.body = null
-    resp.body_len = 0
+    resp.bodyLen = 0
     if method == null || url == null {
         return "net: bad url"
     }
 
     // ---- parse http://host[:port][/path] ----
-    if !starts_with(url, "http://") {
-        if starts_with(url, "https://") {
+    if !startsWith(url, "http://") {
+        if startsWith(url, "https://") {
             return "net: https not supported"
         }
         return "net: bad url"
     }
     var p: u64 = 7 // offset into url
-    var host_off: u64 = 7
-    var host_len: u64 = 0
+    var hostOff: u64 = 7
+    var hostLen: u64 = 0
     var port: u64 = 80
-    var path_off: u64 = 0
+    var pathOff: u64 = 0
     var ulen: u64 = __strlen(url)
     while p < ulen {
         var c: u8 = *(url + p)
@@ -106,58 +106,58 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
         if c == 47 {
             break
         }
-        host_len = host_len + 1
+        hostLen = hostLen + 1
         p = p + 1
     }
-    if host_len == 0 {
+    if hostLen == 0 {
         return "net: bad url"
     }
-    path_off = p
+    pathOff = p
     // host C string
-    var host_raw: *void
+    var hostRaw: *void
     var err: *u8
-    host_raw, err = runtime.Alloc(host_len + 1)
+    hostRaw, err = runtime.Alloc(hostLen + 1)
     if err != 0 {
         return err
     }
-    var host: *u8 = cast[*u8](host_raw)
-    mem.Copy(cast[*void](host), cast[*void](url + host_off), host_len)
-    *(host + host_len) = 0
+    var host: *u8 = cast[*u8](hostRaw)
+    mem.Copy(cast[*void](host), cast[*void](url + hostOff), hostLen)
+    *(host + hostLen) = 0
 
     // path
     var path: *u8
-    if path_off >= ulen {
+    if pathOff >= ulen {
         var pr: *void
         pr, err = runtime.Alloc(2)
         if err != 0 {
-            runtime.Free(host_raw)
+            runtime.Free(hostRaw)
             return err
         }
         path = cast[*u8](pr)
         *path = 47
         *(path + 1) = 0
     } else {
-        var plen: u64 = ulen - path_off
+        var plen: u64 = ulen - pathOff
         var pr2: *void
         pr2, err = runtime.Alloc(plen + 1)
         if err != 0 {
-            runtime.Free(host_raw)
+            runtime.Free(hostRaw)
             return err
         }
         path = cast[*u8](pr2)
-        mem.Copy(cast[*void](path), cast[*void](url + path_off), plen + 1)
+        mem.Copy(cast[*void](path), cast[*void](url + pathOff), plen + 1)
     }
 
     var c: Conn
     c, err = Dial(host, port)
     if err != 0 {
-        runtime.Free(host_raw)
+        runtime.Free(hostRaw)
         runtime.Free(cast[*void](path))
         return err
     }
 
     // ---- build request ----
-    var est: u64 = 256 + __strlen(method) + __strlen(path) + __strlen(host) + body_len
+    var est: u64 = 256 + __strlen(method) + __strlen(path) + __strlen(host) + bodyLen
     if headers != null {
         var hp: u64 = cast[u64](headers)
         while 1 {
@@ -169,15 +169,15 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
             hp = hp + 8
         }
     }
-    var req_raw: *void
-    req_raw, err = runtime.Alloc(est)
+    var reqRaw: *void
+    reqRaw, err = runtime.Alloc(est)
     if err != 0 {
         Close(c)
-        runtime.Free(host_raw)
+        runtime.Free(hostRaw)
         runtime.Free(cast[*void](path))
         return err
     }
-    var req: *u8 = cast[*u8](req_raw)
+    var req: *u8 = cast[*u8](reqRaw)
     var di: u64 = 0
     di = cat(req, di, method)
     *(req + di) = 32
@@ -188,12 +188,12 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
     if port != 80 {
         *(req + di) = 58
         di = di + 1
-        di = cat_num(req, di, port)
+        di = catNum(req, di, port)
     }
     di = cat(req, di, "\r\nUser-Agent: piclang/1\r\nConnection: close\r\n")
-    if body_len > 0 {
+    if bodyLen > 0 {
         di = cat(req, di, "Content-Length: ")
-        di = cat_num(req, di, body_len)
+        di = catNum(req, di, bodyLen)
         di = cat(req, di, "\r\n")
     }
     if headers != null {
@@ -209,17 +209,17 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
         }
     }
     di = cat(req, di, "\r\n")
-    if body_len > 0 {
+    if bodyLen > 0 {
         if body != null {
-            mem.Copy(cast[*void](req + di), cast[*void](body), body_len)
-            di = di + body_len
+            mem.Copy(cast[*void](req + di), cast[*void](body), bodyLen)
+            di = di + bodyLen
         }
     }
-    runtime.Free(host_raw)
+    runtime.Free(hostRaw)
     runtime.Free(cast[*void](path))
 
     err = WriteAll(c, req, di)
-    runtime.Free(req_raw)
+    runtime.Free(reqRaw)
     if err != 0 {
         Close(c)
         return err
@@ -227,39 +227,39 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
 
     // ---- read response ----
     var capn: u64 = 4096
-    var acc_raw: *void
-    acc_raw, err = runtime.Alloc(capn)
+    var accRaw: *void
+    accRaw, err = runtime.Alloc(capn)
     if err != 0 {
         Close(c)
         return err
     }
-    var acc: *u8 = cast[*u8](acc_raw)
+    var acc: *u8 = cast[*u8](accRaw)
     var total: u64 = 0
     while 1 {
         if total >= capn {
             var ncap: u64 = capn * 2
             if ncap > HTTP_MAX_BODY + HTTP_MAX_HDR {
-                runtime.Free(acc_raw)
+                runtime.Free(accRaw)
                 Close(c)
                 return "net: response too large"
             }
             var nr: *void
             nr, err = runtime.Alloc(ncap)
             if err != 0 {
-                runtime.Free(acc_raw)
+                runtime.Free(accRaw)
                 Close(c)
                 return err
             }
             mem.Copy(nr, cast[*void](acc), total)
-            runtime.Free(acc_raw)
-            acc_raw = nr
-            acc = cast[*u8](acc_raw)
+            runtime.Free(accRaw)
+            accRaw = nr
+            acc = cast[*u8](accRaw)
             capn = ncap
         }
         var got: u64
         got, err = Read(c, acc + total, capn - total)
         if err != 0 {
-            runtime.Free(acc_raw)
+            runtime.Free(accRaw)
             Close(c)
             return err
         }
@@ -271,14 +271,14 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
     Close(c)
 
     // ---- parse ----
-    var hdr_end: u64 = total
+    var hdrEnd: u64 = total
     var i: u64 = 0
     while i + 3 < total {
         if *(acc + i) == 13 {
             if *(acc + i + 1) == 10 {
                 if *(acc + i + 2) == 13 {
                     if *(acc + i + 3) == 10 {
-                        hdr_end = i
+                        hdrEnd = i
                         break
                     }
                 }
@@ -289,9 +289,9 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
     // status code after first space
     var status: u32 = 0
     var sp: u64 = 0
-    while sp < hdr_end {
+    while sp < hdrEnd {
         if *(acc + sp) == 32 {
-            if sp + 3 <= hdr_end {
+            if sp + 3 <= hdrEnd {
                 status = cast[u32](*(acc + sp + 1) - 48) * 100
                 status = status + cast[u32](*(acc + sp + 2) - 48) * 10
                 status = status + cast[u32](*(acc + sp + 3) - 48)
@@ -301,46 +301,46 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, body_len: u64, resp: *Res
         sp = sp + 1
     }
     resp.status = status
-    var body_off: u64 = hdr_end
-    if hdr_end + 4 <= total {
-        body_off = hdr_end + 4
+    var bodyOff: u64 = hdrEnd
+    if hdrEnd + 4 <= total {
+        bodyOff = hdrEnd + 4
     }
-    var body_len: u64 = 0
-    if body_off < total {
-        body_len = total - body_off
+    var bodyLen: u64 = 0
+    if bodyOff < total {
+        bodyLen = total - bodyOff
     }
     // Content-Length may shrink
-    var cl: i64 = scan_cl(acc, hdr_end)
+    var cl: i64 = scanCl(acc, hdrEnd)
     if cl >= 0 {
-        if cast[u64](cl) < body_len {
-            body_len = cast[u64](cl)
+        if cast[u64](cl) < bodyLen {
+            bodyLen = cast[u64](cl)
         }
     }
-    if body_len > HTTP_MAX_BODY {
-        runtime.Free(acc_raw)
+    if bodyLen > HTTP_MAX_BODY {
+        runtime.Free(accRaw)
         return "net: response too large"
     }
-    if body_len == 0 {
-        runtime.Free(acc_raw)
+    if bodyLen == 0 {
+        runtime.Free(accRaw)
         resp.body = null
-        resp.body_len = 0
+        resp.bodyLen = 0
         return 0
     }
     var br: *void
-    br, err = runtime.Alloc(body_len + 1)
+    br, err = runtime.Alloc(bodyLen + 1)
     if err != 0 {
-        runtime.Free(acc_raw)
+        runtime.Free(accRaw)
         return err
     }
-    mem.Copy(br, cast[*void](acc + body_off), body_len)
-    *cast[*u8](cast[u64](br) + body_len) = 0
-    runtime.Free(acc_raw)
+    mem.Copy(br, cast[*void](acc + bodyOff), bodyLen)
+    *cast[*u8](cast[u64](br) + bodyLen) = 0
+    runtime.Free(accRaw)
     resp.body = cast[*u8](br)
-    resp.body_len = body_len
+    resp.bodyLen = bodyLen
     return 0
 }
 
-fn starts_with(s: *u8, pref: *u8) -> bool {
+fn startsWith(s: *u8, pref: *u8) -> bool {
     var i: u64 = 0
     while *(pref + i) != 0 {
         if *(s + i) != *(pref + i) {
@@ -361,7 +361,7 @@ fn cat(dst: *u8, di: u64, s: *u8) -> u64 {
     return di
 }
 
-fn cat_num(dst: *u8, di: u64, v: u64) -> u64 {
+fn catNum(dst: *u8, di: u64, v: u64) -> u64 {
     if v == 0 {
         *(dst + di) = 48
         return di + 1
@@ -382,12 +382,12 @@ fn cat_num(dst: *u8, di: u64, v: u64) -> u64 {
     return di
 }
 
-fn scan_cl(raw: *u8, hdr_end: u64) -> i64 {
+fn scanCl(raw: *u8, hdrEnd: u64) -> i64 {
     var i: u64 = 0
-    while i + 15 < hdr_end {
-        if ci_eq(raw + i, "content-length:") {
+    while i + 15 < hdrEnd {
+        if ciEq(raw + i, "content-length:") {
             var p: u64 = i + 15
-            while p < hdr_end {
+            while p < hdrEnd {
                 if *(raw + p) != 32 {
                     break
                 }
@@ -395,7 +395,7 @@ fn scan_cl(raw: *u8, hdr_end: u64) -> i64 {
             }
             var v: i64 = 0
             var any: u64 = 0
-            while p < hdr_end {
+            while p < hdrEnd {
                 var c: u8 = *(raw + p)
                 if c < 48 {
                     break
@@ -425,7 +425,7 @@ fn lower(c: u8) -> u8 {
     return c
 }
 
-fn ci_eq(s: *u8, lit: *u8) -> bool {
+fn ciEq(s: *u8, lit: *u8) -> bool {
     var i: u64 = 0
     while *(lit + i) != 0 {
         if lower(*(s + i)) != lower(*(lit + i)) {

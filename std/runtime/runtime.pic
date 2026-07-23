@@ -1,7 +1,7 @@
 // Package runtime - dual-OS PIC runtime: detect OS, resolve heap, Alloc/Free.
 //
-// One shellcode works on Linux and Windows. Call Init(stack_hint) once from main
-// (stack_hint is the frame pointer passed by the entry stub).
+// One shellcode works on Linux and Windows. Call Init(stackHint) once from main
+// (stackHint is the frame pointer passed by the entry stub).
 //
 // Higher packages (e.g. strings) only use Alloc/Free and stay OS-agnostic.
 // Fallible APIs return (value, *u8) where err == 0 means success.
@@ -24,35 +24,35 @@ const HEAP_ZERO_MEMORY = 0x00000008
 struct State {
     ready: u64
     os: u64
-    stack_hint: PVOID
+    stackHint: PVOID
     // Linux: libc malloc/free
     // Windows: ntdll RtlAllocateHeap / RtlFreeHeap + ProcessHeap
     heap: PVOID
-    fn_alloc: PVOID
-    fn_free: PVOID
+    fnAlloc: PVOID
+    fnFree: PVOID
 }
 
 var g: State
 
 // Init detects the OS, resolves heap APIs, and prepares Alloc/Free.
-// Pass the entry stack_hint (main's first argument) for Linux link_map discovery.
+// Pass the entry stackHint (main's first argument) for Linux linkMap discovery.
 // Returns true on success. On failure, Alloc will return a "not ready" error.
-fn Init(stack_hint: PVOID) -> bool {
+fn Init(stackHint: PVOID) -> bool {
     if g.ready != 0 {
         return g.os != OS_UNKNOWN
     }
-    g.stack_hint = stack_hint
+    g.stackHint = stackHint
     g.os = OS_UNKNOWN
     g.heap = null
-    g.fn_alloc = null
-    g.fn_free = null
+    g.fnAlloc = null
+    g.fnFree = null
 
-    // Prefer Linux when stack_hint can prove link_map. On Linux, GS:[0x60] is often
+    // Prefer Linux when stackHint can prove linkMap. On Linux, GS:[0x60] is often
     // a valid TLS slot (not a PEB); following it as PEB will crash. So never try
     // the Windows path first if Linux resolve works.
-    if stack_hint != null {
-        if lresolve.Probe(stack_hint) {
-            if init_linux(stack_hint) {
+    if stackHint != null {
+        if lresolve.Probe(stackHint) {
+            if initLinux(stackHint) {
                 g.os = OS_LINUX
                 g.ready = 1
                 return true
@@ -60,12 +60,12 @@ fn Init(stack_hint: PVOID) -> bool {
         }
     }
 
-    // Secondary Linux signal: getpid syscall (39) without needing stack_hint.
+    // Secondary Linux signal: getpid syscall (39) without needing stackHint.
     // Success with a positive pid strongly suggests Linux before touching GS.
     var pid: i64 = cast[i64](__syscall(39))
     if pid > 0 {
-        if stack_hint != null {
-            if init_linux(stack_hint) {
+        if stackHint != null {
+            if initLinux(stackHint) {
                 g.os = OS_LINUX
                 g.ready = 1
                 return true
@@ -75,7 +75,7 @@ fn Init(stack_hint: PVOID) -> bool {
 
     // Windows: PEB via GS:[0x60] (only if Linux paths did not claim the process).
     if wresolve.Probe() {
-        if init_windows() {
+        if initWindows() {
             g.os = OS_WINDOWS
             g.ready = 1
             return true
@@ -87,31 +87,31 @@ fn Init(stack_hint: PVOID) -> bool {
     return false
 }
 
-fn init_linux(stack_hint: PVOID) -> bool {
+fn initLinux(stackHint: PVOID) -> bool {
     var H_LIBC6: u32 = __hash("libc.so.6")
     var H_LIBC: u32 = __hash("libc.so")
     var H_MALLOC: u32 = __hash("malloc")
     var H_FREE: u32 = __hash("free")
 
-    var libc: PVOID = lresolve.Module(H_LIBC6, stack_hint)
+    var libc: PVOID = lresolve.Module(H_LIBC6, stackHint)
     if libc == null {
-        libc = lresolve.Module(H_LIBC, stack_hint)
+        libc = lresolve.Module(H_LIBC, stackHint)
     }
     if libc == null {
         return false
     }
-    g.fn_alloc = lresolve.Symbol(libc, H_MALLOC)
-    g.fn_free = lresolve.Symbol(libc, H_FREE)
-    if g.fn_alloc == null {
+    g.fnAlloc = lresolve.Symbol(libc, H_MALLOC)
+    g.fnFree = lresolve.Symbol(libc, H_FREE)
+    if g.fnAlloc == null {
         return false
     }
-    if g.fn_free == null {
+    if g.fnFree == null {
         return false
     }
     return true
 }
 
-fn init_windows() -> bool {
+fn initWindows() -> bool {
     var H_NTDLL: u32 = __hash("NTDLL.DLL")
     var H_RTLALLOC: u32 = __hash("RtlAllocateHeap")
     var H_RTLFREE: u32 = __hash("RtlFreeHeap")
@@ -124,12 +124,12 @@ fn init_windows() -> bool {
     if g.heap == null {
         return false
     }
-    g.fn_alloc = wresolve.Symbol(ntdll, H_RTLALLOC)
-    g.fn_free = wresolve.Symbol(ntdll, H_RTLFREE)
-    if g.fn_alloc == null {
+    g.fnAlloc = wresolve.Symbol(ntdll, H_RTLALLOC)
+    g.fnFree = wresolve.Symbol(ntdll, H_RTLFREE)
+    if g.fnAlloc == null {
         return false
     }
-    if g.fn_free == null {
+    if g.fnFree == null {
         return false
     }
     return true
@@ -153,10 +153,10 @@ fn Ready() -> bool {
     return g.os != OS_UNKNOWN
 }
 
-// StackHint returns the pointer passed to Init (needed for Linux link_map resolve
+// StackHint returns the pointer passed to Init (needed for Linux linkMap resolve
 // in dependent packages such as std/file). Null if Init was never called with one.
 fn StackHint() -> PVOID {
-    return g.stack_hint
+    return g.stackHint
 }
 
 // Alloc returns n bytes of heap memory.
@@ -172,7 +172,7 @@ fn Alloc(n: u64) -> (PVOID, *u8) {
     }
     if g.os == OS_LINUX {
         // malloc(size) SysV: rdi=n
-        var p: PVOID = cast[PVOID](__sysv_call(g.fn_alloc, n))
+        var p: PVOID = cast[PVOID](__sysv_call(g.fnAlloc, n))
         if p == null {
             return null, "runtime: malloc failed"
         }
@@ -180,7 +180,7 @@ fn Alloc(n: u64) -> (PVOID, *u8) {
     }
     if g.os == OS_WINDOWS {
         // RtlAllocateHeap(HeapHandle, Flags, Size) - MS x64 calling convention
-        var f: FnRtlAlloc = cast[FnRtlAlloc](g.fn_alloc)
+        var f: FnRtlAlloc = cast[FnRtlAlloc](g.fnAlloc)
         var p: PVOID = f(g.heap, HEAP_ZERO_MEMORY, n)
         if p == null {
             return null, "runtime: heap alloc failed"
@@ -199,12 +199,12 @@ fn Free(p: PVOID) {
         return
     }
     if g.os == OS_LINUX {
-        __sysv_call(g.fn_free, cast[u64](p))
+        __sysv_call(g.fnFree, cast[u64](p))
         return
     }
     if g.os == OS_WINDOWS {
         // RtlFreeHeap(HeapHandle, Flags, BaseAddress)
-        var f: FnRtlFree = cast[FnRtlFree](g.fn_free)
+        var f: FnRtlFree = cast[FnRtlFree](g.fnFree)
         f(g.heap, 0, p)
     }
 }

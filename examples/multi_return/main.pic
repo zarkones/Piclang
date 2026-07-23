@@ -1,7 +1,7 @@
-// multi_return - multi-value returns, :=, blank _, *u8 errors (null = ok)
+// multiReturn - multi-value returns, :=, blank _, *u8 errors (null = ok)
 //
-//   picc examples/multi_return/main.pic -o multi.bin -rand-sections=false
-//   ./harness/run_shellcode multi.bin   # returns 0
+//   picc examples/multiReturn/main.pic -o multi.bin -rand-sections=false
+//   ./harness/runShellcode multi.bin   # returns 0
 //
 // Convention: fallible APIs return (value, *u8) where err == 0 means success.
 // Multi-return packs up to 4 ABI cells into RAX, RDX, R8, R9.
@@ -29,14 +29,14 @@ fn triple() -> (u64, u64, u64) {
     return 1, 2, 3
 }
 
-// with_defer ensures multi-return survives defer LIFO.
-var g_bump: u64
+// withDefer ensures multi-return survives defer LIFO.
+var gBump: u64
 
 fn bump() {
-    g_bump = g_bump + 1
+    gBump = gBump + 1
 }
 
-fn pair_defer() -> (u64, u64) {
+fn pairDefer() -> (u64, u64) {
     defer bump()
     return 10, 20
 }
@@ -75,12 +75,12 @@ fn main() -> u64 {
     }
 
     // defer runs after results are in regs; values must still be correct
-    g_bump = 0
-    x, y := pair_defer()
+    gBump = 0
+    x, y := pairDefer()
     if x != 10 || y != 20 {
         return 7
     }
-    if g_bump != 1 {
+    if gBump != 1 {
         return 8
     }
 

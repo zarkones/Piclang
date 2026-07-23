@@ -1,13 +1,13 @@
 // slices demo - full []T with make/append/index/subslice/copy/free
 //
 //   picc examples/slices/main.pic -o slices.bin -rand-sections=false
-//   ./harness/run_shellcode slices.bin   # returns 10
+//   ./harness/runShellcode slices.bin   # returns 10
 package main
 
 import "std/runtime"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 1
     }
 

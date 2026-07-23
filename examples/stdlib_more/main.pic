@@ -1,7 +1,7 @@
-// stdlib_more - smoke test for time, env, path, crypto.
+// stdlibMore - smoke test for time, env, path, crypto.
 //
-//   picc examples/stdlib_more/main.pic -o more.bin -rand-sections=false
-//   ./harness/run_shellcode more.bin   # returns 0
+//   picc examples/stdlibMore/main.pic -o more.bin -rand-sections=false
+//   ./harness/runShellcode more.bin   # returns 0
 package main
 
 import "std/runtime"
@@ -10,8 +10,8 @@ import "std/env"
 import "std/path"
 import "std/crypto"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 1
     }
 

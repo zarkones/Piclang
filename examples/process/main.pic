@@ -1,7 +1,7 @@
 // process - spawn shell commands, capture output (Linux harness).
 //
 //   picc examples/process/main.pic -o process.bin -rand-sections=false
-//   ./harness/run_shellcode process.bin   # returns 0
+//   ./harness/runShellcode process.bin   # returns 0
 //
 // Exercises Shell, ShellOutput, Command+argv+Output, and Remove of temp files.
 package main
@@ -10,8 +10,8 @@ import "std/runtime"
 import "std/process"
 import "std/file"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 1
     }
 

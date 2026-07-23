@@ -1,23 +1,23 @@
-// dual_os - one PIC blob for Linux and Windows.
+// dualOs - one PIC blob for Linux and Windows.
 //
 // Uses std/runtime (detect OS + heap) and std/strings (allocating string ops).
 // Fallible APIs return (value, *u8); err == 0 means success.
 //
 // Build (from piclang repo root so std/ is found):
-//   picc examples/dual_os/main.pic -o dual_os.bin -rand-sections=false -S
+//   picc examples/dualOs/main.pic -o dualOs.bin -rand-sections=false -S
 //
 // Linux test:
-//   ./harness/run_shellcode dual_os.bin
+//   ./harness/runShellcode dualOs.bin
 //   # returns 0 on success
 //
-// Windows: map RWX + call entry (stack_hint still passed; PEB path ignores it).
+// Windows: map RWX + call entry (stackHint still passed; PEB path ignores it).
 package main
 
 import "std/runtime"
 import "std/strings"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 0x100
     }
 

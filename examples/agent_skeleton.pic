@@ -1,4 +1,4 @@
-// agent_skeleton.pic - minimal implant-shaped program structure.
+// agentSkeleton.pic - minimal implant-shaped program structure.
 // OS-agnostic language features; Windows PEB bits are optional helpers.
 
 type PVOID = *void
@@ -8,24 +8,24 @@ struct Context {
     base: u64
     size: u64
     beacon: PVOID
-    sleep_ms: DWORD
+    sleepMs: DWORD
 }
 
-var g_ctx: Context
+var gCtx: Context
 
-fn init_ctx() {
-    g_ctx.base = __base()
-    g_ctx.size = __end() - __base()
-    g_ctx.beacon = null
-    g_ctx.sleep_ms = 5000
+fn initCtx() {
+    gCtx.base = __base()
+    gCtx.size = __end() - __base()
+    gCtx.beacon = null
+    gCtx.sleepMs = 5000
 }
 
-fn checkin_msg() -> *u8 {
+fn checkinMsg() -> *u8 {
     // Compiler emits this into .rdata; RIP-relative access at runtime.
     return "agent/checkin"
 }
 
-fn xor_decode(buf: *u8, n: u64, key: u8) {
+fn xorDecode(buf: *u8, n: u64, key: u8) {
     var i: u64 = 0
     while i < n {
         var p: *u8 = buf + i
@@ -35,9 +35,9 @@ fn xor_decode(buf: *u8, n: u64, key: u8) {
 }
 
 fn main() -> u64 {
-    init_ctx()
+    initCtx()
 
-    var msg: *u8 = checkin_msg()
+    var msg: *u8 = checkinMsg()
     var n: u64 = __strlen(msg)
 
     // Local working buffer (stack)
@@ -56,5 +56,5 @@ fn main() -> u64 {
     // Compile-time API hash for later resolution
     var h: u32 = __hash("VirtualAlloc")
 
-    return g_ctx.size + cast[u64](h) + n
+    return gCtx.size + cast[u64](h) + n
 }

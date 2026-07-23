@@ -142,10 +142,10 @@ fn Append(a: *u8, b: *u8) -> (*u8, *u8) {
 
 // Replace returns a new string with the first occurrence of old replaced by new.
 // On success: (s, 0). On failure: (null, error).
-fn Replace(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
+fn Replace(s: *u8, old: *u8, newS: *u8) -> (*u8, *u8) {
     var n: u64 = Len(s)
     var m: u64 = Len(old)
-    var k: u64 = Len(new_s)
+    var k: u64 = Len(newS)
     if m == 0 {
         return Append(s, cast[*u8](null))
     }
@@ -179,10 +179,10 @@ fn Replace(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
     if idx > n {
         return Append(s, cast[*u8](null))
     }
-    var out_len: u64 = n - m + k
+    var outLen: u64 = n - m + k
     var raw: *void
     var err: *u8
-    raw, err = runtime.Alloc(out_len + 1)
+    raw, err = runtime.Alloc(outLen + 1)
     if err != 0 {
         return null, err
     }
@@ -191,13 +191,13 @@ fn Replace(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
         mem.Copy(cast[*void](out), cast[*void](s), idx)
     }
     if k > 0 {
-        mem.Copy(cast[*void](out + idx), cast[*void](new_s), k)
+        mem.Copy(cast[*void](out + idx), cast[*void](newS), k)
     }
     var rest: u64 = n - idx - m
     if rest > 0 {
         mem.Copy(cast[*void](out + idx + k), cast[*void](s + idx + m), rest)
     }
-    *(out + out_len) = 0
+    *(out + outLen) = 0
     return out, 0
 }
 
@@ -234,7 +234,7 @@ fn Count(s: *u8, old: *u8) -> u64 {
 
 // ReplaceAll returns a new string with every occurrence of old replaced by new.
 // On success: (s, 0). On failure: (null, error).
-fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
+fn ReplaceAll(s: *u8, old: *u8, newS: *u8) -> (*u8, *u8) {
     if s == null {
         return null, "strings: null input"
     }
@@ -242,7 +242,7 @@ fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
     if m == 0 {
         return Append(s, cast[*u8](null))
     }
-    var k: u64 = Len(new_s)
+    var k: u64 = Len(newS)
     var n: u64 = Len(s)
     // Count occurrences (no break - nested break is unreliable in current codegen)
     var count: u64 = 0
@@ -266,10 +266,10 @@ fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
     if count == 0 {
         return Append(s, cast[*u8](null))
     }
-    var out_len: u64 = n - count * m + count * k
+    var outLen: u64 = n - count * m + count * k
     var raw: *void
     var err: *u8
-    raw, err = runtime.Alloc(out_len + 1)
+    raw, err = runtime.Alloc(outLen + 1)
     if err != 0 {
         return null, err
     }
@@ -293,7 +293,7 @@ fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
         }
         if match != 0 {
             if k > 0 {
-                mem.Copy(cast[*void](out + di), cast[*void](new_s), k)
+                mem.Copy(cast[*void](out + di), cast[*void](newS), k)
             }
             di = di + k
             si = si + m

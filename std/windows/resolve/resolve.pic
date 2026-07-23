@@ -33,43 +33,43 @@ struct PEB {
 }
 
 struct IMAGE_DOS_HEADER {
-    e_magic: USHORT
-    e_cblp: USHORT
-    e_cp: USHORT
-    e_crlc: USHORT
-    e_cparhdr: USHORT
-    e_minalloc: USHORT
-    e_maxalloc: USHORT
-    e_ss: USHORT
-    e_sp: USHORT
-    e_csum: USHORT
-    e_ip: USHORT
-    e_cs: USHORT
-    e_lfarlc: USHORT
-    e_ovno: USHORT
-    e_res0: USHORT
-    e_res1: USHORT
-    e_res2: USHORT
-    e_res3: USHORT
-    e_oemid: USHORT
-    e_oeminfo: USHORT
-    e_res2_0: USHORT
-    e_res2_1: USHORT
-    e_res2_2: USHORT
-    e_res2_3: USHORT
-    e_res2_4: USHORT
-    e_res2_5: USHORT
-    e_res2_6: USHORT
-    e_res2_7: USHORT
-    e_res2_8: USHORT
-    e_res2_9: USHORT
-    e_lfanew: i32
+    eMagic: USHORT
+    eCblp: USHORT
+    eCp: USHORT
+    eCrlc: USHORT
+    eCparhdr: USHORT
+    eMinalloc: USHORT
+    eMaxalloc: USHORT
+    eSs: USHORT
+    eSp: USHORT
+    eCsum: USHORT
+    eIp: USHORT
+    eCs: USHORT
+    eLfarlc: USHORT
+    eOvno: USHORT
+    eRes0: USHORT
+    eRes1: USHORT
+    eRes2: USHORT
+    eRes3: USHORT
+    eOemid: USHORT
+    eOeminfo: USHORT
+    eRes20: USHORT
+    eRes21: USHORT
+    eRes22: USHORT
+    eRes23: USHORT
+    eRes24: USHORT
+    eRes25: USHORT
+    eRes26: USHORT
+    eRes27: USHORT
+    eRes28: USHORT
+    eRes29: USHORT
+    eLfanew: i32
 }
 
-fn hash_wstr(buf: *u16, n_bytes: u64) -> u32 {
+fn hashWstr(buf: *u16, nBytes: u64) -> u32 {
     var h: u32 = 5381
     var i: u64 = 0
-    while i < n_bytes {
+    while i < nBytes {
         var ch: u16 = __load16(cast[*void](cast[u64](buf) + i))
         var c: u32 = cast[u32](ch & 0xFF)
         if c >= 0x61 {
@@ -83,20 +83,20 @@ fn hash_wstr(buf: *u16, n_bytes: u64) -> u32 {
     return h
 }
 
-fn get_peb() -> *PEB {
+fn getPeb() -> *PEB {
     return cast[*PEB](__readgs(0x60))
 }
 
 // Probe returns true if GS:[0x60] looks like a Windows x64 PEB.
 fn Probe() -> bool {
-    var peb_u: u64 = __readgs(0x60)
-    if peb_u == 0 {
+    var pebU: u64 = __readgs(0x60)
+    if pebU == 0 {
         return false
     }
-    if (peb_u & 7) != 0 {
+    if (pebU & 7) != 0 {
         return false
     }
-    var peb: *PEB = cast[*PEB](peb_u)
+    var peb: *PEB = cast[*PEB](pebU)
     var ldr: *PEB_LDR_DATA = peb.Ldr
     if ldr == null {
         return false
@@ -126,18 +126,18 @@ fn Module(want: u32) -> PVOID {
     if !Probe() {
         return null
     }
-    var peb: *PEB = get_peb()
+    var peb: *PEB = getPeb()
     var ldr: *PEB_LDR_DATA = peb.Ldr
     var head: *LIST_ENTRY = cast[*LIST_ENTRY](cast[u64](ldr) + 0x10)
     var cur: *LIST_ENTRY = head.Flink
     while cur != head {
         var ent: PVOID = cast[PVOID](cur)
         // BaseDllName: Length @ +88, Buffer @ +96 (x64 LDR_DATA_TABLE_ENTRY simplified)
-        var name_len: u16 = __load16(cast[*void](cast[u64](ent) + 88))
-        var name_buf: *u16 = cast[*u16](__load64(cast[*void](cast[u64](ent) + 96)))
-        if name_buf != null {
-            if name_len != 0 {
-                var h: u32 = hash_wstr(name_buf, cast[u64](name_len))
+        var nameLen: u16 = __load16(cast[*void](cast[u64](ent) + 88))
+        var nameBuf: *u16 = cast[*u16](__load64(cast[*void](cast[u64](ent) + 96)))
+        if nameBuf != null {
+            if nameLen != 0 {
+                var h: u32 = hashWstr(nameBuf, cast[u64](nameLen))
                 if h == want {
                     // DllBase at +48 after 3 LIST_ENTRY (24*2? wait 16*3=48)
                     return cast[PVOID](__load64(cast[*void](cast[u64](ent) + 48)))
@@ -155,31 +155,31 @@ fn Symbol(base: PVOID, want: u32) -> PVOID {
         return null
     }
     var dos: *IMAGE_DOS_HEADER = cast[*IMAGE_DOS_HEADER](base)
-    if dos.e_magic != 0x5A4D {
+    if dos.eMagic != 0x5A4D {
         return null
     }
-    var nt: u64 = cast[u64](base) + cast[u64](dos.e_lfanew)
+    var nt: u64 = cast[u64](base) + cast[u64](dos.eLfanew)
     var opt: u64 = nt + 24
     if __load16(cast[*void](opt)) != 0x20B {
         return null
     }
-    var export_rva: u32 = __load32(cast[*void](opt + 112))
-    if export_rva == 0 {
+    var exportRva: u32 = __load32(cast[*void](opt + 112))
+    if exportRva == 0 {
         return null
     }
-    var exp: u64 = cast[u64](base) + cast[u64](export_rva)
+    var exp: u64 = cast[u64](base) + cast[u64](exportRva)
     var nNames: u32 = __load32(cast[*void](exp + 0x18))
     var addrFuncs: u32 = __load32(cast[*void](exp + 0x1C))
     var addrNames: u32 = __load32(cast[*void](exp + 0x20))
     var addrOrds: u32 = __load32(cast[*void](exp + 0x24))
     var i: u32 = 0
     while i < nNames {
-        var name_rva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrNames) + cast[u64](i) * 4))
-        var namep: *u8 = cast[*u8](cast[u64](base) + cast[u64](name_rva))
+        var nameRva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrNames) + cast[u64](i) * 4))
+        var namep: *u8 = cast[*u8](cast[u64](base) + cast[u64](nameRva))
         if __hash(namep) == want {
             var ord: u16 = __load16(cast[*void](cast[u64](base) + cast[u64](addrOrds) + cast[u64](i) * 2))
-            var fn_rva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrFuncs) + cast[u64](ord) * 4))
-            return cast[PVOID](cast[u64](base) + cast[u64](fn_rva))
+            var fnRva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrFuncs) + cast[u64](ord) * 4))
+            return cast[PVOID](cast[u64](base) + cast[u64](fnRva))
         }
         i = i + 1
     }

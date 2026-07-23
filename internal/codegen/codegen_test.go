@@ -197,8 +197,8 @@ fn main() -> u64 {
 func TestSlicesBasic(t *testing.T) {
 	src := `
 import "std/runtime"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var s: []u8 = make([]u8, 0, 8)
     s = append(s, 10)
     s = append(s, 20)
@@ -222,8 +222,8 @@ fn main(stack_hint: *void) -> u64 {
 func TestSlicesGrowCopy(t *testing.T) {
 	src := `
 import "std/runtime"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var s: []u64 = make([]u64, 0, 2)
     s = append(s, 1)
     s = append(s, 2)
@@ -240,8 +240,8 @@ fn main(stack_hint: *void) -> u64 {
 	_ = src
 	src = `
 import "std/runtime"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var s: []u64 = make([]u64, 0, 2)
     s = append(s, 1)
     s = append(s, 2)
@@ -419,15 +419,15 @@ fn main() -> u64 {
 func TestMultiReturnSliceAndError(t *testing.T) {
 	src := `
 import "std/runtime"
-fn make_buf() -> ([]u8, *u8) {
+fn makeBuf() -> ([]u8, *u8) {
     var s: []u8 = make([]u8, 2, 2)
     s[0] = 10
     s[1] = 20
     return s, 0
 }
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
-    s, err := make_buf()
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
+    s, err := makeBuf()
     if err != 0 { return 2 }
     if len(s) != 2 { free(s); return 3 }
     var sum: u64 = cast[u64](s[0]) + cast[u64](s[1])
@@ -444,8 +444,8 @@ fn main(stack_hint: *void) -> u64 {
 func TestRuntimeAllocMultiReturn(t *testing.T) {
 	src := `
 import "std/runtime"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     p, err := runtime.Alloc(32)
     if err != 0 { return 2 }
     if p == 0 { return 3 }
@@ -465,8 +465,8 @@ func TestStringsAppendMultiReturn(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/strings"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     s, err := strings.Append("foo", "bar")
     if err != 0 { return 2 }
     if !strings.Compare(s, "foobar") { runtime.Free(s); return 3 }
@@ -524,8 +524,8 @@ func TestFileWriteReadRemove(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/file"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var path: *u8 = "/tmp/piclang_codegen_file_test.txt"
     var err: *u8 = file.WriteString(path, "pic-ok")
     if err != 0 { return 2 }
@@ -565,8 +565,8 @@ func TestProcessShell(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/process"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     code, err := process.Shell("true")
     if err != 0 { return 2 }
     if code != 0 { return 3 }
@@ -591,8 +591,8 @@ func TestProcessCommandOutput(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/process"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var c: process.Cmd
     process.Command(&c, "/bin/echo")
     var argv: [3]*u8
@@ -632,8 +632,8 @@ func TestCryptoXORRC4Hex(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/crypto"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     var b: [3]u8
     b[0] = 10; b[1] = 20; b[2] = 30
     crypto.XORBytes(&b[0], 3, "xy", 2)
@@ -666,8 +666,8 @@ func TestPathJoinBase(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/path"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     j, err := path.Join("/tmp", "x")
     if err != 0 { return 2 }
     b, err2 := path.Base(j)
@@ -688,8 +688,8 @@ func TestTimeSleepMono(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/time"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     t0, err := time.Mono()
     if err != 0 { return 2 }
     if time.Sleep(10 * time.Millisecond) != 0 { return 3 }
@@ -707,8 +707,8 @@ func TestEnvSetGet(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/env"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     if env.Set("PICLANG_CGO_ENV", "z") != 0 { return 2 }
     v, err := env.Get("PICLANG_CGO_ENV")
     if err != 0 { return 3 }
@@ -743,8 +743,8 @@ func TestNetParseIP(t *testing.T) {
 	src := `
 import "std/runtime"
 import "std/net"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     if net.Init() != 0 { return 2 }
     ip, err := net.ParseIP("127.0.0.1")
     if err != 0 { return 3 }
@@ -787,8 +787,8 @@ func TestNetTCPEcho(t *testing.T) {
 	src := fmt.Sprintf(`
 import "std/runtime"
 import "std/net"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     if net.Init() != 0 { return 2 }
     c, err := net.DialIP(0x7F000001, %d)
     if err != 0 { return 3 }
@@ -830,14 +830,14 @@ func TestNetHTTPGet(t *testing.T) {
 	src := fmt.Sprintf(`
 import "std/runtime"
 import "std/net"
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) { return 1 }
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) { return 1 }
     if net.Init() != 0 { return 2 }
     var resp: net.Response
     err := net.Get("http://127.0.0.1:%d/", &resp)
     if err != 0 { return 3 }
     if resp.status != 200 { net.FreeResponse(&resp); return 4 }
-    if resp.body_len != 10 { net.FreeResponse(&resp); return 5 }
+    if resp.bodyLen != 10 { net.FreeResponse(&resp); return 5 }
     if resp.body[0] != 104 { net.FreeResponse(&resp); return 6 }
     net.FreeResponse(&resp)
     return 0

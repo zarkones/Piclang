@@ -1,16 +1,16 @@
-// file_io - dual-OS file package demo (WriteString / ReadAll / Remove).
+// fileIo - dual-OS file package demo (WriteString / ReadAll / Remove).
 //
-//   picc examples/file_io/main.pic -o file_io.bin -rand-sections=false
-//   ./harness/run_shellcode file_io.bin   # returns 0 on Linux
+//   picc examples/fileIo/main.pic -o fileIo.bin -rand-sections=false
+//   ./harness/runShellcode fileIo.bin   # returns 0 on Linux
 //
-// Writes /tmp/piclang_file_io_test.txt, reads it back, deletes it.
+// Writes /tmp/piclangFileIoTest.txt, reads it back, deletes it.
 package main
 
 import "std/runtime"
 import "std/file"
 
-fn main(stack_hint: *void) -> u64 {
-    if !runtime.Init(stack_hint) {
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
         return 1
     }
 
@@ -26,8 +26,8 @@ fn main(stack_hint: *void) -> u64 {
     }
     defer free(data)
     
-    var out_path: *u8 = "outttt.txt"
-    var werr: *u8 = file.WriteAll(out_path, data, 11)
+    var outPath: *u8 = "outttt.txt"
+    var werr: *u8 = file.WriteAll(outPath, data, 11)
 
 
     // if len(data) != 10 {
