@@ -10,7 +10,7 @@ fn main(stackHint: *void) -> u64 {
         return 1
     }
     h, err := os.Hostname()
-    if err != 0 {
+    if err != null {
         return 2
     }
     defer runtime.Free(h)
@@ -18,19 +18,19 @@ fn main(stackHint: *void) -> u64 {
         return 3
     }
     cwd, err2 := os.GetCwd()
-    if err2 != 0 {
+    if err2 != null {
         return 4
     }
     defer runtime.Free(cwd)
     n, err3 := os.NumCPU()
-    if err3 != 0 {
+    if err3 != null {
         return 5
     }
     if n < 1 {
         return 6
     }
     u, err4 := os.Username()
-    if err4 != 0 {
+    if err4 != null {
         return 7
     }
     defer runtime.Free(u)

@@ -12,7 +12,7 @@ fn main(stackHint: *void) -> u64 {
         return 2
     }
     p, err := runtime.Alloc(32)
-    if err != 0 {
+    if err != null {
         return 3
     }
     runtime.Free(p)

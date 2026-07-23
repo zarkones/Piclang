@@ -264,7 +264,7 @@ fn IPToString(ip: u32) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(16)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -321,7 +321,7 @@ fn fillSockaddrIn(sa: *u8, ip: u32, port: u64) {
 
 fn DialIP(ip: u32, port: u64) -> (Conn, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return INVALID, err
     }
     if port > 65535 {
@@ -373,7 +373,7 @@ fn dialIpWindows(ip: u32, port: u64) -> (Conn, *u8) {
 // Resolve returns first IPv4 for host (presentation order), or ParseIP if already dotted.
 fn Resolve(host: *u8) -> (u32, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if host == null {
@@ -383,7 +383,7 @@ fn Resolve(host: *u8) -> (u32, *u8) {
     var ip: u32
     var e2: *u8
     ip, e2 = ParseIP(host)
-    if e2 == 0 {
+    if e2 == null {
         return ip, 0
     }
     if runtime.IsLinux() {
@@ -487,7 +487,7 @@ fn resolveWindows(host: *u8) -> (u32, *u8) {
 // ResolveAll fills out[0..max) with presentation-order IPv4s. Returns count.
 fn ResolveAll(host: *u8, out: *u32, max: u64) -> (u64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if host == null || out == null || max == 0 {
@@ -497,7 +497,7 @@ fn ResolveAll(host: *u8, out: *u32, max: u64) -> (u64, *u8) {
     var one: u32
     var e2: *u8
     one, e2 = ParseIP(host)
-    if e2 == 0 {
+    if e2 == null {
         *out = one
         return 1, 0
     }
@@ -596,7 +596,7 @@ fn Dial(host: *u8, port: u64) -> (Conn, *u8) {
     var n: u64
     var err: *u8
     n, err = ResolveAll(host, &ips[0], 8)
-    if err != 0 {
+    if err != null {
         return INVALID, err
     }
     var i: u64 = 0
@@ -604,7 +604,7 @@ fn Dial(host: *u8, port: u64) -> (Conn, *u8) {
     while i < n {
         var c: Conn
         c, err = DialIP(ips[i], port)
-        if err == 0 {
+        if err == null {
             return c, 0
         }
         last = err
@@ -650,7 +650,7 @@ fn WriteAll(c: Conn, buf: *u8, n: u64) -> *u8 {
         var nw: u64
         var err: *u8
         nw, err = Write(c, buf + off, n - off)
-        if err != 0 {
+        if err != null {
             return err
         }
         if nw == 0 {
@@ -695,7 +695,7 @@ fn ReadFull(c: Conn, buf: *u8, n: u64) -> *u8 {
         var nr: u64
         var err: *u8
         nr, err = Read(c, buf + off, n - off)
-        if err != 0 {
+        if err != null {
             return err
         }
         if nr == 0 {

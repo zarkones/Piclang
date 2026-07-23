@@ -403,7 +403,7 @@ fn noinheritWindows(h: Handle) {
 // Start launches the process. Does not wait.
 fn Start(c: *Cmd) -> *u8 {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return err
     }
     if c.started != 0 {
@@ -457,20 +457,20 @@ fn startLinux(c: *Cmd) -> *u8 {
     // setup pipes
     if c.stdinMode == STD_PIPE {
         err = makePipe(&c._in_r, &c.stdinW)
-        if err != 0 {
+        if err != null {
             return err
         }
     }
     if c.stdoutMode == STD_PIPE {
         err = makePipe(&c.stdoutR, &c._out_w)
-        if err != 0 {
+        if err != null {
             Release(c)
             return err
         }
     }
     if c.stderrMode == STD_PIPE {
         err = makePipe(&c.stderrR, &c._err_w)
-        if err != 0 {
+        if err != null {
             Release(c)
             return err
         }
@@ -594,14 +594,14 @@ fn startWindows(c: *Cmd) -> *u8 {
     var err: *u8 = 0
     if c.stdinMode == STD_PIPE {
         err = makePipe(&c._in_r, &c.stdinW)
-        if err != 0 {
+        if err != null {
             return err
         }
         noinheritWindows(c.stdinW)
     }
     if c.stdoutMode == STD_PIPE {
         err = makePipe(&c.stdoutR, &c._out_w)
-        if err != 0 {
+        if err != null {
             Release(c)
             return err
         }
@@ -609,7 +609,7 @@ fn startWindows(c: *Cmd) -> *u8 {
     }
     if c.stderrMode == STD_PIPE {
         err = makePipe(&c.stderrR, &c._err_w)
-        if err != 0 {
+        if err != null {
             Release(c)
             return err
         }
@@ -657,7 +657,7 @@ fn startWindows(c: *Cmd) -> *u8 {
     var clOwned: *u8 = null
     if cl == null {
         clOwned, err = buildCmdline(c)
-        if err != 0 {
+        if err != null {
             Release(c)
             return err
         }
@@ -669,7 +669,7 @@ fn startWindows(c: *Cmd) -> *u8 {
     var envOwned: *u8 = null
     if c.env != null {
         envOwned, err = buildEnvBlock(c.env)
-        if err != 0 {
+        if err != null {
             if clOwned != null {
                 runtime.Free(cast[*void](clOwned))
             }
@@ -740,7 +740,7 @@ fn buildCmdline(c: *Cmd) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 8)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -806,7 +806,7 @@ fn buildEnvBlock(env: **u8) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -920,7 +920,7 @@ fn Release(c: *Cmd) {
 // Run starts and waits with current config. Returns (exitCode, err).
 fn Run(c: *Cmd) -> (i32, *u8) {
     var err: *u8 = Start(c)
-    if err != 0 {
+    if err != null {
         return -1, err
     }
     var code: i32
@@ -941,7 +941,7 @@ fn readAllFrom(h: Handle) -> ([]u8, *u8) {
         var n: u64
         var err: *u8
         n, err = readHandle(h, &chunk[0], 4096)
-        if err != 0 {
+        if err != null {
             free(s)
             return empty, err
         }
@@ -967,14 +967,14 @@ fn Output(c: *Cmd) -> ([]u8, *u8) {
     var empty: []u8 = make([]u8, 0, 0)
     c.stdoutMode = STD_PIPE
     var err: *u8 = Start(c)
-    if err != 0 {
+    if err != null {
         return empty, err
     }
     // close stdin if we opened a pipe unused
     CloseStdin(c)
     var data: []u8
     data, err = readAllFrom(c.stdoutR)
-    if err != 0 {
+    if err != null {
         Kill(c)
         Wait(c)
         Release(c)
@@ -984,7 +984,7 @@ fn Output(c: *Cmd) -> ([]u8, *u8) {
     code, err = Wait(c)
     c.exitCode = code
     Release(c)
-    if err != 0 {
+    if err != null {
         free(data)
         return empty, err
     }
@@ -999,14 +999,14 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     c.stderrMode = STD_PIPE
     // We'll merge by reading both - simpler portable approach:
     var err: *u8 = Start(c)
-    if err != 0 {
+    if err != null {
         return empty, err
     }
     CloseStdin(c)
     // read stdout fully first then stderr (fine for moderate output)
     var out: []u8
     out, err = readAllFrom(c.stdoutR)
-    if err != 0 {
+    if err != null {
         Kill(c)
         Wait(c)
         Release(c)
@@ -1014,7 +1014,7 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     }
     var errb: []u8
     errb, err = readAllFrom(c.stderrR)
-    if err != 0 {
+    if err != null {
         free(out)
         Kill(c)
         Wait(c)
@@ -1032,7 +1032,7 @@ fn CombinedOutput(c: *Cmd) -> ([]u8, *u8) {
     code, err = Wait(c)
     c.exitCode = code
     Release(c)
-    if err != 0 {
+    if err != null {
         free(out)
         return empty, err
     }
@@ -1070,7 +1070,7 @@ fn runShellLine(line: *u8, kind: u64) -> (i32, *u8) {
                 errw = winCmdline(&c, "cmd.exe /c ", line)
             }
         }
-        if errw != 0 {
+        if errw != null {
             return -1, errw
         }
         return Run(&c)
@@ -1155,7 +1155,7 @@ fn runShellOutput(line: *u8, kind: u64) -> ([]u8, *u8) {
                 errw = winCmdline(&c, "cmd.exe /c ", line)
             }
         }
-        if errw != 0 {
+        if errw != null {
             return empty, errw
         }
     } else {
@@ -1200,7 +1200,7 @@ fn winCmdline(c: *Cmd, prefix: *u8, line: *u8) -> *u8 {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n)
-    if err != 0 {
+    if err != null {
         return err
     }
     var out: *u8 = cast[*u8](raw)

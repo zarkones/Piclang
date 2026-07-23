@@ -37,7 +37,7 @@ fn allocCopy(s: *u8, n: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -168,7 +168,7 @@ fn Ext(p: *u8) -> (*u8, *u8) {
     var base: *u8
     var err: *u8
     base, err = Base(p)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var n: u64 = strlen(base)
@@ -215,7 +215,7 @@ fn Join(a: *u8, b: *u8) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(total + 1)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -248,7 +248,7 @@ fn Clean(p: *u8) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)

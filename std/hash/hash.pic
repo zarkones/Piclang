@@ -108,7 +108,7 @@ fn sumAlloc(n: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     return cast[*u8](raw), 0
@@ -119,11 +119,11 @@ fn SumMD5(data: *u8, n: u64) -> (*u8, *u8) {
     var out: *u8
     var err: *u8
     out, err = sumAlloc(MD5_SIZE)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     err = MD5(data, n, out)
-    if err != 0 {
+    if err != null {
         runtime.Free(cast[*void](out))
         return null, err
     }
@@ -135,11 +135,11 @@ fn SumSHA1(data: *u8, n: u64) -> (*u8, *u8) {
     var out: *u8
     var err: *u8
     out, err = sumAlloc(SHA1_SIZE)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     err = SHA1(data, n, out)
-    if err != 0 {
+    if err != null {
         runtime.Free(cast[*void](out))
         return null, err
     }
@@ -151,11 +151,11 @@ fn SumSHA256(data: *u8, n: u64) -> (*u8, *u8) {
     var out: *u8
     var err: *u8
     out, err = sumAlloc(SHA256_SIZE)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     err = SHA256(data, n, out)
-    if err != 0 {
+    if err != null {
         runtime.Free(cast[*void](out))
         return null, err
     }

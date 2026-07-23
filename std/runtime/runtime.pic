@@ -4,7 +4,7 @@
 // (stackHint is the frame pointer passed by the entry stub).
 //
 // Higher packages (e.g. strings) only use Alloc/Free and stay OS-agnostic.
-// Fallible APIs return (value, *u8) where err == 0 means success.
+// Fallible APIs return (value, *u8) where err == null means success.
 package runtime
 
 import lresolve "std/linux/resolve"

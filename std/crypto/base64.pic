@@ -54,7 +54,7 @@ fn Base64Encode(data: *u8, n: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(outN + 1)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -123,7 +123,7 @@ fn Base64Decode(s: *u8) -> (*u8, u64, *u8) {
         var empty: *void
         var err0: *u8
         empty, err0 = runtime.Alloc(1)
-        if err0 != 0 {
+        if err0 != null {
             return null, 0, err0
         }
         *cast[*u8](empty) = 0
@@ -136,7 +136,7 @@ fn Base64Decode(s: *u8) -> (*u8, u64, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(outMax + 1)
-    if err != 0 {
+    if err != null {
         return null, 0, err
     }
     var out: *u8 = cast[*u8](raw)

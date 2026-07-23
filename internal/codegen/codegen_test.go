@@ -376,10 +376,10 @@ fn lookup(key: u64) -> (u64, *u8) {
 }
 fn main() -> u64 {
     val, err := lookup(21)
-    if err != 0 { return 1 }
+    if err != null { return 1 }
     if val != 42 { return 2 }
     _, err2 := lookup(0)
-    if err2 == 0 { return 3 }
+    if err2 == null { return 3 }
     return 0
 }
 `
@@ -428,7 +428,7 @@ fn makeBuf() -> ([]u8, *u8) {
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     s, err := makeBuf()
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if len(s) != 2 { free(s); return 3 }
     var sum: u64 = cast[u64](s[0]) + cast[u64](s[1])
     free(s)
@@ -447,7 +447,7 @@ import "std/runtime"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     p, err := runtime.Alloc(32)
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if p == 0 { return 3 }
     runtime.Free(p)
     // Alloc without Init should fail (use a fresh failure path via Ready false only if we can't)
@@ -468,11 +468,11 @@ import "std/strings"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     s, err := strings.Append("foo", "bar")
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if !strings.Compare(s, "foobar") { runtime.Free(s); return 3 }
     t, err2 := strings.ReplaceAll(s, "foo", "baz")
     runtime.Free(s)
-    if err2 != 0 { return 4 }
+    if err2 != null { return 4 }
     if !strings.Compare(t, "bazbar") { runtime.Free(t); return 5 }
     runtime.Free(t)
     return 0
@@ -509,7 +509,7 @@ func TestAllocNotReady(t *testing.T) {
 import "std/runtime"
 fn main() -> u64 {
     p, err := runtime.Alloc(16)
-    if err == 0 { return 1 }
+    if err == null { return 1 }
     if p != 0 { return 2 }
     return 0
 }
@@ -528,15 +528,15 @@ fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     var path: *u8 = "/tmp/piclang_codegen_file_test.txt"
     var err: *u8 = file.WriteString(path, "pic-ok")
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     data, err2 := file.ReadAll(path)
-    if err2 != 0 { return 3 }
+    if err2 != null { return 3 }
     if len(data) != 6 { free(data); return 4 }
     if data[0] != 112 { free(data); return 5 }
     free(data)
-    if file.Remove(path) != 0 { return 6 }
+    if file.Remove(path) != null { return 6 }
     _, err3 := file.ReadAll(path)
-    if err3 == 0 { return 7 }
+    if err3 == null { return 7 }
     return 0
 }
 `
@@ -551,7 +551,7 @@ func TestFileNotReady(t *testing.T) {
 import "std/file"
 fn main() -> u64 {
     err := file.WriteString("/tmp/x", "y")
-    if err == 0 { return 1 }
+    if err == null { return 1 }
     return 0
 }
 `
@@ -568,15 +568,15 @@ import "std/process"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     code, err := process.Shell("true")
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if code != 0 { return 3 }
     out, err2 := process.ShellOutput("echo -n ab")
-    if err2 != 0 { return 4 }
+    if err2 != null { return 4 }
     if len(out) != 2 { free(out); return 5 }
     if out[0] != 97 { free(out); return 6 }
     free(out)
     st, err3 := process.SelfTest()
-    if err3 != 0 { return 7 }
+    if err3 != null { return 7 }
     if st != 0 { return 8 }
     return 0
 }
@@ -601,7 +601,7 @@ fn main(stackHint: *void) -> u64 {
     argv[2] = null
     process.SetArgv(&c, cast[**u8](&argv[0]))
     data, err := process.Output(&c)
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if len(data) < 2 { free(data); return 3 }
     free(data)
     return 0
@@ -647,10 +647,10 @@ fn main(stackHint: *void) -> u64 {
     crypto.RC4XOR(&st2, &b[0], 3)
     if b[1] != 20 { return 3 }
     h, err := crypto.HexEncode(&b[0], 2)
-    if err != 0 { return 4 }
+    if err != null { return 4 }
     p, n, err2 := crypto.HexDecode(h)
     runtime.Free(h)
-    if err2 != 0 { return 5 }
+    if err2 != null { return 5 }
     if n != 2 { runtime.Free(p); return 6 }
     runtime.Free(p)
     return 0
@@ -669,9 +669,9 @@ import "std/path"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     j, err := path.Join("/tmp", "x")
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     b, err2 := path.Base(j)
-    if err2 != 0 { runtime.Free(j); return 3 }
+    if err2 != null { runtime.Free(j); return 3 }
     if __strlen(b) != 1 { runtime.Free(j); runtime.Free(b); return 4 }
     runtime.Free(b)
     runtime.Free(j)
@@ -691,8 +691,8 @@ import "std/time"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     t0, err := time.Mono()
-    if err != 0 { return 2 }
-    if time.Sleep(10 * time.Millisecond) != 0 { return 3 }
+    if err != null { return 2 }
+    if time.Sleep(10 * time.Millisecond) != null { return 3 }
     if time.Since(t0) < 1 * time.Millisecond { return 4 }
     return 0
 }
@@ -709,12 +709,12 @@ import "std/runtime"
 import "std/env"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
-    if env.Set("PICLANG_CGO_ENV", "z") != 0 { return 2 }
+    if env.Set("PICLANG_CGO_ENV", "z") != null { return 2 }
     v, err := env.Get("PICLANG_CGO_ENV")
-    if err != 0 { return 3 }
+    if err != null { return 3 }
     if __strlen(v) != 1 { runtime.Free(v); return 4 }
     runtime.Free(v)
-    if env.Unset("PICLANG_CGO_ENV") != 0 { return 5 }
+    if env.Unset("PICLANG_CGO_ENV") != null { return 5 }
     return 0
 }
 `
@@ -732,11 +732,11 @@ import "std/strings"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     e, err := crypto.Base64Encode("abc", 3)
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if !strings.Compare(e, "YWJj") { runtime.Free(e); return 3 }
     runtime.Free(e)
     d, n, err2 := crypto.Base64Decode("YWJj")
-    if err2 != 0 { return 4 }
+    if err2 != null { return 4 }
     if n != 3 { runtime.Free(d); return 5 }
     if d[0] != 97 { runtime.Free(d); return 6 }
     if d[2] != 99 { runtime.Free(d); return 7 }
@@ -748,10 +748,10 @@ fn main(stackHint: *void) -> u64 {
     crypto.RC4Init(&st, "k", 1)
     crypto.RC4XOR(&st, &buf[0], 3)
     b64, err3 := crypto.Base64Encode(&buf[0], 3)
-    if err3 != 0 { return 8 }
+    if err3 != null { return 8 }
     raw, rn, err4 := crypto.Base64Decode(b64)
     runtime.Free(b64)
-    if err4 != 0 { return 9 }
+    if err4 != null { return 9 }
     var st2: crypto.RC4
     crypto.RC4Init(&st2, "k", 1)
     crypto.RC4XOR(&st2, raw, rn)
@@ -780,39 +780,39 @@ fn main(stackHint: *void) -> u64 {
     var hx: *u8
     var err: *u8
 
-    if hash.MD5(d, 3, &out[0]) != 0 { return 10 }
+    if hash.MD5(d, 3, &out[0]) != null { return 10 }
     hx, err = crypto.HexEncode(&out[0], 16)
-    if err != 0 { return 11 }
+    if err != null { return 11 }
     if !strings.Compare(hx, "900150983cd24fb0d6963f7d28e17f72") { runtime.Free(hx); return 12 }
     runtime.Free(hx)
 
-    if hash.SHA1(d, 3, &out[0]) != 0 { return 20 }
+    if hash.SHA1(d, 3, &out[0]) != null { return 20 }
     hx, err = crypto.HexEncode(&out[0], 20)
-    if err != 0 { return 21 }
+    if err != null { return 21 }
     if !strings.Compare(hx, "a9993e364706816aba3e25717850c26c9cd0d89d") { runtime.Free(hx); return 22 }
     runtime.Free(hx)
 
-    if hash.SHA256(d, 3, &out[0]) != 0 { return 30 }
+    if hash.SHA256(d, 3, &out[0]) != null { return 30 }
     hx, err = crypto.HexEncode(&out[0], 32)
-    if err != 0 { return 31 }
+    if err != null { return 31 }
     if !strings.Compare(hx, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") { runtime.Free(hx); return 32 }
     runtime.Free(hx)
 
-    if hash.MD5(cast[*u8](0), 0, &out[0]) != 0 { return 40 }
+    if hash.MD5(cast[*u8](0), 0, &out[0]) != null { return 40 }
     hx, err = crypto.HexEncode(&out[0], 16)
-    if err != 0 { return 41 }
+    if err != null { return 41 }
     if !strings.Compare(hx, "d41d8cd98f00b204e9800998ecf8427e") { runtime.Free(hx); return 42 }
     runtime.Free(hx)
 
-    if hash.SHA1(cast[*u8](0), 0, &out[0]) != 0 { return 50 }
+    if hash.SHA1(cast[*u8](0), 0, &out[0]) != null { return 50 }
     hx, err = crypto.HexEncode(&out[0], 20)
-    if err != 0 { return 51 }
+    if err != null { return 51 }
     if !strings.Compare(hx, "da39a3ee5e6b4b0d3255bfef95601890afd80709") { runtime.Free(hx); return 52 }
     runtime.Free(hx)
 
-    if hash.SHA256(cast[*u8](0), 0, &out[0]) != 0 { return 60 }
+    if hash.SHA256(cast[*u8](0), 0, &out[0]) != null { return 60 }
     hx, err = crypto.HexEncode(&out[0], 32)
-    if err != 0 { return 61 }
+    if err != null { return 61 }
     if !strings.Compare(hx, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") { runtime.Free(hx); return 62 }
     runtime.Free(hx)
 
@@ -835,23 +835,23 @@ fn main(stackHint: *void) -> u64 {
     if !strings.Compare(os.OSName(), "linux") { return 2 }
     if !strings.Compare(os.Arch(), "x86_64") { return 3 }
     n, err := os.NumCPU()
-    if err != 0 { return 4 }
+    if err != null { return 4 }
     if n < 1 { return 5 }
     ps, err2 := os.PageSize()
-    if err2 != 0 { return 6 }
+    if err2 != null { return 6 }
     if ps < 4096 { return 7 }
     ram, err3 := os.TotalRAM()
-    if err3 != 0 { return 8 }
+    if err3 != null { return 8 }
     if ram < 1024 * 1024 { return 9 }
     pid, err4 := os.PID()
-    if err4 != 0 { return 10 }
+    if err4 != null { return 10 }
     if pid < 1 { return 11 }
     user, err5 := os.Username()
-    if err5 != 0 { return 12 }
+    if err5 != null { return 12 }
     if user == null || __strlen(user) == 0 { return 13 }
     runtime.Free(user)
     model, err6 := os.CPUModel()
-    if err6 != 0 { return 14 }
+    if err6 != null { return 14 }
     if model == null || __strlen(model) == 0 { runtime.Free(model); return 15 }
     runtime.Free(model)
     return 0
@@ -871,23 +871,23 @@ import "std/os"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     h, err := os.Hostname()
-    if err != 0 { return 2 }
+    if err != null { return 2 }
     if h == null { return 3 }
     if __strlen(h) == 0 { runtime.Free(h); return 4 }
     runtime.Free(h)
     p, err2 := os.GetCwd()
-    if err2 != 0 { return 5 }
+    if err2 != null { return 5 }
     if p == null { return 6 }
     if *p != 47 { runtime.Free(p); return 7 }
     runtime.Free(p)
     td, err3 := os.GetTempDir()
-    if err3 != 0 { return 8 }
+    if err3 != null { return 8 }
     if td == null { return 9 }
     if __strlen(td) == 0 { runtime.Free(td); return 10 }
     runtime.Free(td)
-    if env.Set("HOME", "/tmp") != 0 { return 11 }
+    if env.Set("HOME", "/tmp") != null { return 11 }
     home, err4 := os.GetHomeDir()
-    if err4 != 0 { return 12 }
+    if err4 != null { return 12 }
     if home == null { return 13 }
     if __strlen(home) != 4 { runtime.Free(home); return 14 }
     if *home != 47 { runtime.Free(home); return 15 }
@@ -922,12 +922,12 @@ import "std/runtime"
 import "std/net"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
-    if net.Init() != 0 { return 2 }
+    if net.Init() != null { return 2 }
     ip, err := net.ParseIP("127.0.0.1")
-    if err != 0 { return 3 }
+    if err != null { return 3 }
     if ip != 0x7F000001 { return 4 }
     s, err2 := net.IPToString(ip)
-    if err2 != 0 { return 5 }
+    if err2 != null { return 5 }
     if __strlen(s) != 9 { runtime.Free(s); return 6 }
     runtime.Free(s)
     return 0
@@ -966,11 +966,11 @@ import "std/runtime"
 import "std/net"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
-    if net.Init() != 0 { return 2 }
+    if net.Init() != null { return 2 }
     c, err := net.DialIP(0x7F000001, %d)
-    if err != 0 { return 3 }
+    if err != null { return 3 }
     net.SetNoDelay(c, true)
-    if net.WriteAll(c, "ping", 4) != 0 { net.Close(c); return 4 }
+    if net.WriteAll(c, "ping", 4) != null { net.Close(c); return 4 }
     var buf: [8]u8
     var n: u64
     var e: *u8
@@ -1009,9 +1009,9 @@ import "std/runtime"
 import "std/net"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
-    if net.Init() != 0 { return 2 }
+    if net.Init() != null { return 2 }
     resp, err := net.Get("http://127.0.0.1:%d/")
-    if err != 0 { return 3 }
+    if err != null { return 3 }
     if resp.status != 200 { net.FreeResponse(resp); return 4 }
     if resp.bodyLen != 10 { net.FreeResponse(resp); return 5 }
     if resp.body[0] != 104 { net.FreeResponse(resp); return 6 }

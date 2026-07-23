@@ -46,7 +46,7 @@ Import paths look like import "std/runtime". Names that start with a capital let
 
 Conventions I stuck to:
 
-    Fallible calls that produce a value: (value, *u8), err == 0 means success.
+    Fallible calls that produce a value: (value, *u8), err == null means success.
     Ops that only fail: return *u8, 0 means ok.
     Heap *u8 from Alloc / most string APIs: runtime.Free when you are done.
     Owning slices: free(s). Views (subslices) do not own memory — do not free them.

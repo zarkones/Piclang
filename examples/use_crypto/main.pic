@@ -33,13 +33,13 @@ fn main(stackHint: *void) -> u64 {
     }
 
     hx, err := crypto.HexEncode(&buf[0], 2)
-    if err != 0 {
+    if err != null {
         return 4
     }
     defer runtime.Free(hx)
 
     b64, err2 := crypto.Base64Encode("hi", 2)
-    if err2 != 0 {
+    if err2 != null {
         return 5
     }
     defer runtime.Free(b64)

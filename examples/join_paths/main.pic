@@ -10,12 +10,12 @@ fn main(stackHint: *void) -> u64 {
         return 1
     }
     j, err := path.Join("/var", "log")
-    if err != 0 {
+    if err != null {
         return 2
     }
     defer runtime.Free(j)
     b, err2 := path.Base(j)
-    if err2 != 0 {
+    if err2 != null {
         return 3
     }
     defer runtime.Free(b)

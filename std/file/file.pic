@@ -3,7 +3,7 @@
 // Requires runtime.Init(stackHint) first. APIs resolve libc (Linux) or
 // kernel32 (Windows) on first use.
 //
-// Errors: fallible APIs return *u8 where 0 means success.
+// Errors: fallible APIs return *u8 where null means success.
 // ReadAll returns ([]u8, *u8); the slice owns its buffer - free(data) when done.
 //
 // Paths are byte strings (*u8): POSIX paths on Linux, ANSI (CreateFileA) on Windows.
@@ -163,7 +163,7 @@ fn ensureWindows() -> *u8 {
 // Open opens path with an abstract mode (O_READ, O_WRITE, O_READWRITE).
 fn Open(path: *u8, mode: u64) -> (Handle, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return INVALID, err
     }
     if path == null {
@@ -225,7 +225,7 @@ fn Close(h: Handle) -> *u8 {
         return 0
     }
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return err
     }
     if runtime.IsLinux() {
@@ -248,7 +248,7 @@ fn Close(h: Handle) -> *u8 {
 // Read reads up to n bytes into buf. Returns (bytesRead, err).
 fn Read(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if h == INVALID {
@@ -279,7 +279,7 @@ fn Read(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
 // Write writes n bytes from buf. Returns (bytesWritten, err).
 fn Write(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if h == INVALID {
@@ -310,7 +310,7 @@ fn Write(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
 // Size returns the file size in bytes for an open handle.
 fn Size(h: Handle) -> (u64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if h == INVALID {
@@ -341,7 +341,7 @@ fn Size(h: Handle) -> (u64, *u8) {
 // Remove deletes the file at path.
 fn Remove(path: *u8) -> *u8 {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return err
     }
     if path == null {
@@ -369,7 +369,7 @@ fn WriteAll(path: *u8, data: *u8, n: u64) -> *u8 {
     var h: Handle
     var err: *u8
     h, err = Open(path, O_WRITE)
-    if err != 0 {
+    if err != null {
         return err
     }
     var off: u64 = 0
@@ -377,7 +377,7 @@ fn WriteAll(path: *u8, data: *u8, n: u64) -> *u8 {
         var nw: u64
         var e2: *u8
         nw, e2 = Write(h, data + off, n - off)
-        if e2 != 0 {
+        if e2 != null {
             Close(h)
             return e2
         }
@@ -405,12 +405,12 @@ fn ReadAll(path: *u8) -> ([]u8, *u8) {
     var h: Handle
     var err: *u8
     h, err = Open(path, O_READ)
-    if err != 0 {
+    if err != null {
         return empty, err
     }
     var n: u64
     n, err = Size(h)
-    if err != 0 {
+    if err != null {
         Close(h)
         return empty, err
     }
@@ -433,7 +433,7 @@ fn ReadAll(path: *u8) -> ([]u8, *u8) {
         var nr: u64
         var e2: *u8
         nr, e2 = Read(h, &s[0] + off, n - off)
-        if e2 != 0 {
+        if e2 != null {
             Close(h)
             free(s)
             return empty, e2
@@ -446,7 +446,7 @@ fn ReadAll(path: *u8) -> ([]u8, *u8) {
         off = off + nr
     }
     err = Close(h)
-    if err != 0 {
+    if err != null {
         free(s)
         return empty, err
     }

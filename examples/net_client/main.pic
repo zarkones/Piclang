@@ -11,25 +11,25 @@ fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) {
         return 1
     }
-    if net.Init() != 0 {
+    if net.Init() != null {
         return 2
     }
 
     ip, err := net.ParseIP("127.0.0.1")
-    if err != 0 {
+    if err != null {
         return 3
     }
     if ip != 0x7F000001 {
         return 4
     }
     s, err2 := net.IPToString(ip)
-    if err2 != 0 {
+    if err2 != null {
         return 5
     }
     defer runtime.Free(s)
 
     resp, err3 := net.Get("http://127.0.0.1:8080/")
-    if err3 != 0 {
+    if err3 != null {
         return 0
     }
     defer net.FreeResponse(resp)

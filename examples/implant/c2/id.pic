@@ -19,7 +19,7 @@ fn appendPart(acc: *u8, part: *u8) -> (*u8, *u8) {
     }
     mid, err := strings.Append(acc, "|")
     runtime.Free(acc)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     defer runtime.Free(mid)
@@ -57,29 +57,29 @@ fn u64Dec(buf: *u8, v: u64) -> u64 {
 // Material: hostname|username|cpumodel|os|arch|ncpu|ram
 fn GetAgentID() -> (*u8, *u8) {
     host, err := os.Hostname()
-    if err != 0 {
+    if err != null {
         return null, err
     }
     defer runtime.Free(host)
 
     user, err2 := os.Username()
-    if err2 != 0 {
+    if err2 != null {
         return null, err2
     }
     defer runtime.Free(user)
 
     cpu, err3 := os.CPUModel()
-    if err3 != 0 {
+    if err3 != null {
         return null, err3
     }
     defer runtime.Free(cpu)
 
     ncpu, err4 := os.NumCPU()
-    if err4 != 0 {
+    if err4 != null {
         return null, err4
     }
     ram, err5 := os.TotalRAM()
-    if err5 != 0 {
+    if err5 != null {
         return null, err5
     }
 
@@ -92,31 +92,31 @@ fn GetAgentID() -> (*u8, *u8) {
     u64Dec(&rbuf[0], ram)
 
     acc, err6 := appendPart(null, host)
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, user)
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, cpu)
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, osName)
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, arch)
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, &nbuf[0])
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     acc, err6 = appendPart(acc, &rbuf[0])
-    if err6 != 0 {
+    if err6 != null {
         return null, err6
     }
     // Register after final assign: defer captures the pointer at this point.
@@ -124,12 +124,12 @@ fn GetAgentID() -> (*u8, *u8) {
 
     var dig: [20]u8
     var herr: *u8 = hash.SHA1(acc, __strlen(acc), &dig[0])
-    if herr != 0 {
+    if herr != null {
         return null, herr
     }
 
     hex, herr2 := crypto.HexEncode(&dig[0], hash.SHA1_SIZE)
-    if herr2 != 0 {
+    if herr2 != null {
         return null, herr2
     }
     return hex, 0

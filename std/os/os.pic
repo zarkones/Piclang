@@ -1,7 +1,7 @@
 // Package os - dual-OS host, process path, and machine details.
 //
 // Requires runtime.Init first. Fallible APIs return (value, *u8) where
-// err == 0 means success. Heap strings: caller runtime.Free.
+// err == null means success. Heap strings: caller runtime.Free.
 // Static strings (OSName, Arch): do not Free.
 package os
 
@@ -97,7 +97,7 @@ fn allocCopy(s: *u8, n: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var out: *u8 = cast[*u8](raw)
@@ -118,7 +118,7 @@ fn dupCstr(s: *u8) -> (*u8, *u8) {
 // Hostname returns the system hostname as a heap C string.
 fn Hostname() -> (*u8, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return null, err
     }
     if runtime.IsLinux() {
@@ -147,7 +147,7 @@ fn Hostname() -> (*u8, *u8) {
 // GetCwd returns the current working directory as a heap C string.
 fn GetCwd() -> (*u8, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return null, err
     }
     if runtime.IsLinux() {
@@ -185,7 +185,7 @@ fn GetHomeDir() -> (*u8, *u8) {
         var ok: bool
         var err: *u8
         v, ok, err = env.Lookup("HOME")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if !ok {
@@ -198,7 +198,7 @@ fn GetHomeDir() -> (*u8, *u8) {
         var ok: bool
         var err: *u8
         v, ok, err = env.Lookup("USERPROFILE")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if ok {
@@ -207,13 +207,13 @@ fn GetHomeDir() -> (*u8, *u8) {
         var drive: *u8
         var okD: bool
         drive, okD, err = env.Lookup("HOMEDRIVE")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         var path: *u8
         var okP: bool
         path, okP, err = env.Lookup("HOMEPATH")
-        if err != 0 {
+        if err != null {
             if okD {
                 runtime.Free(cast[*void](drive))
             }
@@ -232,7 +232,7 @@ fn GetHomeDir() -> (*u8, *u8) {
         var np: u64 = __strlen(path)
         var raw: *void
         raw, err = runtime.Alloc(nd + np + 1)
-        if err != 0 {
+        if err != null {
             runtime.Free(cast[*void](drive))
             runtime.Free(cast[*void](path))
             return null, err
@@ -251,14 +251,14 @@ fn GetHomeDir() -> (*u8, *u8) {
 // Linux: $TMPDIR or "/tmp". Windows: GetTempPathA, else TEMP/TMP env.
 fn GetTempDir() -> (*u8, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return null, err
     }
     if runtime.IsLinux() {
         var v: *u8
         var ok: bool
         v, ok, err = env.Lookup("TMPDIR")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if ok {
@@ -278,14 +278,14 @@ fn GetTempDir() -> (*u8, *u8) {
         var v: *u8
         var ok: bool
         v, ok, err = env.Lookup("TEMP")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if ok {
             return v, 0
         }
         v, ok, err = env.Lookup("TMP")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if ok {

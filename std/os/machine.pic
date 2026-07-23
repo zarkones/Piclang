@@ -28,7 +28,7 @@ type FnGetUserNameA = fn(*u8, *u32) -> u32
 // ensureMachine resolves extra symbols used by machine APIs (idempotent with ensure).
 fn ensureMachine() -> *u8 {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return err
     }
     if runtime.IsLinux() {
@@ -97,7 +97,7 @@ fn OSName() -> *u8 {
 // NumCPU returns the number of logical processors online.
 fn NumCPU() -> (u64, *u8) {
     var err: *u8 = ensureMachine()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if runtime.IsLinux() {
@@ -123,7 +123,7 @@ fn NumCPU() -> (u64, *u8) {
 // PageSize returns the system memory page size in bytes.
 fn PageSize() -> (u64, *u8) {
     var err: *u8 = ensureMachine()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if runtime.IsLinux() {
@@ -149,7 +149,7 @@ fn PageSize() -> (u64, *u8) {
 // TotalRAM returns approximate total physical memory in bytes.
 fn TotalRAM() -> (u64, *u8) {
     var err: *u8 = ensureMachine()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if runtime.IsLinux() {
@@ -198,7 +198,7 @@ fn PID() -> (u64, *u8) {
     }
     if runtime.IsWindows() {
         var err: *u8 = ensureMachine()
-        if err != 0 {
+        if err != null {
             return 0, err
         }
         var f: FnGetCurrentProcessId = cast[FnGetCurrentProcessId](g.getCurrentProcessId)
@@ -222,7 +222,7 @@ fn Username() -> (*u8, *u8) {
         var ok: bool
         var err: *u8
         v, ok, err = env.Lookup("USER")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if !ok {
@@ -232,7 +232,7 @@ fn Username() -> (*u8, *u8) {
     }
     if runtime.IsWindows() {
         var err: *u8 = ensureMachine()
-        if err != 0 {
+        if err != null {
             return null, err
         }
         var buf: [256]u8
@@ -319,7 +319,7 @@ fn CPUModel() -> (*u8, *u8) {
         var h: file.Handle
         var err: *u8
         h, err = file.Open("/proc/cpuinfo", file.O_READ)
-        if err != 0 {
+        if err != null {
             return null, err
         }
         // typical cpuinfo is a few KB; cap at 64KiB
@@ -329,7 +329,7 @@ fn CPUModel() -> (*u8, *u8) {
             var nr: u64
             var e2: *u8
             nr, e2 = file.Read(h, &buf[0] + total, 65536 - total)
-            if e2 != 0 {
+            if e2 != null {
                 file.Close(h)
                 return null, e2
             }
@@ -349,7 +349,7 @@ fn CPUModel() -> (*u8, *u8) {
         var ok: bool
         var err: *u8
         v, ok, err = env.Lookup("PROCESSOR_IDENTIFIER")
-        if err != 0 {
+        if err != null {
             return null, err
         }
         if !ok {

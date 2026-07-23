@@ -9,18 +9,18 @@ fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) {
         return 1
     }
-    if env.Set("PICLANG_DEMO", "ok") != 0 {
+    if env.Set("PICLANG_DEMO", "ok") != null {
         return 2
     }
     v, err := env.Get("PICLANG_DEMO")
-    if err != 0 {
+    if err != null {
         return 3
     }
     defer runtime.Free(v)
     if __strlen(v) != 2 {
         return 4
     }
-    if env.Unset("PICLANG_DEMO") != 0 {
+    if env.Unset("PICLANG_DEMO") != null {
         return 5
     }
     return 0

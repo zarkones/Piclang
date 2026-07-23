@@ -100,7 +100,7 @@ fn UnixNano(ns: i64) -> i64 {
 // Sleep pauses for at least d nanoseconds.
 fn Sleep(d: Duration) -> *u8 {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return err
     }
     if d <= 0 {
@@ -145,7 +145,7 @@ fn Sleep(d: Duration) -> *u8 {
 // Now returns Unix wall time in nanoseconds since epoch.
 fn Now() -> (i64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if runtime.IsLinux() {
@@ -178,7 +178,7 @@ fn Now() -> (i64, *u8) {
 // Mono returns a monotonic clock reading in nanoseconds (for intervals).
 fn Mono() -> (i64, *u8) {
     var err: *u8 = ensure()
-    if err != 0 {
+    if err != null {
         return 0, err
     }
     if runtime.IsLinux() {
@@ -213,7 +213,7 @@ fn Since(startNs: i64) -> Duration {
     var now: i64
     var err: *u8
     now, err = Mono()
-    if err != 0 {
+    if err != null {
         return 0
     }
     return now - startNs

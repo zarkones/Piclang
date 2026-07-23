@@ -10,17 +10,17 @@ fn main(stackHint: *void) -> u64 {
         return 1
     }
     t0, err := time.Mono()
-    if err != 0 {
+    if err != null {
         return 2
     }
-    if time.Sleep(15 * time.Millisecond) != 0 {
+    if time.Sleep(15 * time.Millisecond) != null {
         return 3
     }
     if time.Since(t0) < 5 * time.Millisecond {
         return 4
     }
     now, err2 := time.Now()
-    if err2 != 0 {
+    if err2 != null {
         return 5
     }
     if now < 1600000000 * time.Second {

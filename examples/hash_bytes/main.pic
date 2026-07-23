@@ -15,11 +15,11 @@ fn main(stackHint: *void) -> u64 {
     var out: [32]u8
     var msg: *u8 = "abc"
 
-    if hash.MD5(msg, 3, &out[0]) != 0 {
+    if hash.MD5(msg, 3, &out[0]) != null {
         return 2
     }
     hx, err := crypto.HexEncode(&out[0], hash.MD5_SIZE)
-    if err != 0 {
+    if err != null {
         return 3
     }
     defer runtime.Free(hx)
@@ -27,10 +27,10 @@ fn main(stackHint: *void) -> u64 {
         return 4
     }
 
-    if hash.SHA1(msg, 3, &out[0]) != 0 {
+    if hash.SHA1(msg, 3, &out[0]) != null {
         return 5
     }
-    if hash.SHA256(msg, 3, &out[0]) != 0 {
+    if hash.SHA256(msg, 3, &out[0]) != null {
         return 6
     }
     return 0

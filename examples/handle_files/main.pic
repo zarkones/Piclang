@@ -12,17 +12,17 @@ fn main(stackHint: *void) -> u64 {
 
     var path: *u8 = "/tmp/piclang_handle_files.txt"
 
-    if file.WriteString(path, "line one\n") != 0 {
+    if file.WriteString(path, "line one\n") != null {
         return 2
     }
 
     var msg: *u8 = "hello from piclang\n"
-    if file.WriteAll(path, msg, __strlen(msg)) != 0 {
+    if file.WriteAll(path, msg, __strlen(msg)) != null {
         return 3
     }
 
     data, err := file.ReadAll(path)
-    if err != 0 {
+    if err != null {
         return 4
     }
     defer free(data)
@@ -35,11 +35,11 @@ fn main(stackHint: *void) -> u64 {
     }
 
     h, err2 := file.Open(path, file.O_READ)
-    if err2 != 0 {
+    if err2 != null {
         return 7
     }
     n, err3 := file.Size(h)
-    if err3 != 0 {
+    if err3 != null {
         file.Close(h)
         return 8
     }
@@ -51,7 +51,7 @@ fn main(stackHint: *void) -> u64 {
     var buf: [32]u8
     got, err4 := file.Read(h, &buf[0], 5)
     file.Close(h)
-    if err4 != 0 {
+    if err4 != null {
         return 10
     }
     if got != 5 {
@@ -61,7 +61,7 @@ fn main(stackHint: *void) -> u64 {
         return 12
     }
 
-    if file.Remove(path) != 0 {
+    if file.Remove(path) != null {
         return 13
     }
     return 0

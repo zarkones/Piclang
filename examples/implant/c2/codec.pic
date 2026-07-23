@@ -20,7 +20,7 @@ fn Seal(plain: *u8, n: u64, key: *u8, keyLen: u64) -> (*u8, *u8) {
     var raw: *void
     var err: *u8
     raw, err = runtime.Alloc(n)
-    if err != 0 {
+    if err != null {
         return null, err
     }
     var buf: *u8 = cast[*u8](raw)
@@ -44,7 +44,7 @@ fn Open(b64: *u8, key: *u8, keyLen: u64) -> (*u8, u64, *u8) {
         return null, 0, "c2: null key"
     }
     plain, n, err := crypto.Base64Decode(b64)
-    if err != 0 {
+    if err != null {
         return null, 0, err
     }
     if n == 0 {
