@@ -1,0 +1,31 @@
+// picc examples/run_process/main.pic -o run_process.bin -rand-sections=false
+// ./harness/run_shellcode run_process.bin
+package main
+
+import "std/runtime"
+import "std/process"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    code, err := process.Shell("true")
+    if err != 0 {
+        return 2
+    }
+    if code != 0 {
+        return 3
+    }
+    out, err2 := process.ShellOutput("echo -n hi")
+    if err2 != 0 {
+        return 4
+    }
+    defer free(out)
+    if len(out) != 2 {
+        return 5
+    }
+    if out[0] != 104 {
+        return 6
+    }
+    return 0
+}

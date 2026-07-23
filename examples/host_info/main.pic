@@ -1,0 +1,38 @@
+// picc examples/host_info/main.pic -o host_info.bin -rand-sections=false
+// ./harness/run_shellcode host_info.bin
+package main
+
+import "std/runtime"
+import "std/os"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    h, err := os.Hostname()
+    if err != 0 {
+        return 2
+    }
+    defer runtime.Free(h)
+    if __strlen(h) == 0 {
+        return 3
+    }
+    cwd, err2 := os.GetCwd()
+    if err2 != 0 {
+        return 4
+    }
+    defer runtime.Free(cwd)
+    n, err3 := os.NumCPU()
+    if err3 != 0 {
+        return 5
+    }
+    if n < 1 {
+        return 6
+    }
+    u, err4 := os.Username()
+    if err4 != 0 {
+        return 7
+    }
+    defer runtime.Free(u)
+    return 0
+}

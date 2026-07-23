@@ -1,0 +1,23 @@
+// picc examples/touch_memory/main.pic -o touch_memory.bin -rand-sections=false
+// ./harness/run_shellcode touch_memory.bin
+package main
+
+import "std/mem"
+
+fn main() -> u64 {
+    var a: [8]u8
+    var b: [8]u8
+    mem.Set(cast[*void](&a[0]), 0, 8)
+    a[0] = 1
+    a[1] = 2
+    a[2] = 3
+    a[3] = 4
+    mem.Copy(cast[*void](&b[0]), cast[*void](&a[0]), 8)
+    if !mem.Equal(cast[*void](&a[0]), cast[*void](&b[0]), 4) {
+        return 1
+    }
+    if b[3] != 4 {
+        return 2
+    }
+    return 0
+}

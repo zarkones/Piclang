@@ -1,0 +1,29 @@
+// picc examples/join_paths/main.pic -o join_paths.bin -rand-sections=false
+// ./harness/run_shellcode join_paths.bin
+package main
+
+import "std/runtime"
+import "std/path"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    j, err := path.Join("/var", "log")
+    if err != 0 {
+        return 2
+    }
+    defer runtime.Free(j)
+    b, err2 := path.Base(j)
+    if err2 != 0 {
+        return 3
+    }
+    defer runtime.Free(b)
+    if __strlen(b) != 3 {
+        return 4
+    }
+    if !path.IsAbs("/tmp") {
+        return 5
+    }
+    return 0
+}

@@ -1,0 +1,30 @@
+// picc examples/sleep_clocks/main.pic -o sleep_clocks.bin -rand-sections=false
+// ./harness/run_shellcode sleep_clocks.bin
+package main
+
+import "std/runtime"
+import "std/time"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    t0, err := time.Mono()
+    if err != 0 {
+        return 2
+    }
+    if time.Sleep(15 * time.Millisecond) != 0 {
+        return 3
+    }
+    if time.Since(t0) < 5 * time.Millisecond {
+        return 4
+    }
+    now, err2 := time.Now()
+    if err2 != 0 {
+        return 5
+    }
+    if now < 1600000000 * time.Second {
+        return 6
+    }
+    return 0
+}

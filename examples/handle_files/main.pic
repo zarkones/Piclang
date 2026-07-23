@@ -1,0 +1,68 @@
+// picc examples/handle_files/main.pic -o handle_files.bin -rand-sections=false
+// ./harness/run_shellcode handle_files.bin
+package main
+
+import "std/runtime"
+import "std/file"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+
+    var path: *u8 = "/tmp/piclang_handle_files.txt"
+
+    if file.WriteString(path, "line one\n") != 0 {
+        return 2
+    }
+
+    var msg: *u8 = "hello from piclang\n"
+    if file.WriteAll(path, msg, __strlen(msg)) != 0 {
+        return 3
+    }
+
+    data, err := file.ReadAll(path)
+    if err != 0 {
+        return 4
+    }
+    defer free(data)
+
+    if len(data) != __strlen(msg) {
+        return 5
+    }
+    if data[0] != 104 {
+        return 6
+    }
+
+    h, err2 := file.Open(path, file.O_READ)
+    if err2 != 0 {
+        return 7
+    }
+    n, err3 := file.Size(h)
+    if err3 != 0 {
+        file.Close(h)
+        return 8
+    }
+    if n != len(data) {
+        file.Close(h)
+        return 9
+    }
+
+    var buf: [32]u8
+    got, err4 := file.Read(h, &buf[0], 5)
+    file.Close(h)
+    if err4 != 0 {
+        return 10
+    }
+    if got != 5 {
+        return 11
+    }
+    if buf[0] != 104 {
+        return 12
+    }
+
+    if file.Remove(path) != 0 {
+        return 13
+    }
+    return 0
+}

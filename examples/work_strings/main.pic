@@ -1,0 +1,38 @@
+// picc examples/work_strings/main.pic -o work_strings.bin -rand-sections=false
+// ./harness/run_shellcode work_strings.bin
+package main
+
+import "std/runtime"
+import "std/strings"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    if strings.Len("abc") != 3 {
+        return 2
+    }
+    if !strings.HasPrefix("foobar", "foo") {
+        return 3
+    }
+    if !strings.Contains("foobar", "oba") {
+        return 4
+    }
+    s, err := strings.Append("pic", "lang")
+    if err != 0 {
+        return 5
+    }
+    defer runtime.Free(s)
+    if !strings.Compare(s, "piclang") {
+        return 6
+    }
+    t, err2 := strings.ReplaceAll(s, "pic", "Pic")
+    if err2 != 0 {
+        return 7
+    }
+    defer runtime.Free(t)
+    if !strings.Compare(t, "Piclang") {
+        return 8
+    }
+    return 0
+}

@@ -1,0 +1,50 @@
+// picc examples/use_crypto/main.pic -o use_crypto.bin -rand-sections=false
+// ./harness/run_shellcode use_crypto.bin
+package main
+
+import "std/runtime"
+import "std/crypto"
+import "std/strings"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+
+    var buf: [4]u8
+    buf[0] = 1
+    buf[1] = 2
+    buf[2] = 3
+    buf[3] = 4
+    crypto.XORBytes(&buf[0], 4, "key", 3)
+    crypto.XORBytes(&buf[0], 4, "key", 3)
+    if buf[0] != 1 {
+        return 2
+    }
+
+    var st: crypto.RC4
+    crypto.RC4Init(&st, "secret", 6)
+    crypto.RC4XOR(&st, &buf[0], 4)
+    var st2: crypto.RC4
+    crypto.RC4Init(&st2, "secret", 6)
+    crypto.RC4XOR(&st2, &buf[0], 4)
+    if buf[3] != 4 {
+        return 3
+    }
+
+    hx, err := crypto.HexEncode(&buf[0], 2)
+    if err != 0 {
+        return 4
+    }
+    defer runtime.Free(hx)
+
+    b64, err2 := crypto.Base64Encode("hi", 2)
+    if err2 != 0 {
+        return 5
+    }
+    defer runtime.Free(b64)
+    if !strings.Compare(b64, "aGk=") {
+        return 6
+    }
+    return 0
+}

@@ -1,0 +1,37 @@
+// picc examples/hash_bytes/main.pic -o hash_bytes.bin -rand-sections=false
+// ./harness/run_shellcode hash_bytes.bin
+package main
+
+import "std/runtime"
+import "std/hash"
+import "std/crypto"
+import "std/strings"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+
+    var out: [32]u8
+    var msg: *u8 = "abc"
+
+    if hash.MD5(msg, 3, &out[0]) != 0 {
+        return 2
+    }
+    hx, err := crypto.HexEncode(&out[0], hash.MD5_SIZE)
+    if err != 0 {
+        return 3
+    }
+    defer runtime.Free(hx)
+    if !strings.Compare(hx, "900150983cd24fb0d6963f7d28e17f72") {
+        return 4
+    }
+
+    if hash.SHA1(msg, 3, &out[0]) != 0 {
+        return 5
+    }
+    if hash.SHA256(msg, 3, &out[0]) != 0 {
+        return 6
+    }
+    return 0
+}

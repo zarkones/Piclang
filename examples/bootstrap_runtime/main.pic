@@ -1,0 +1,26 @@
+// picc examples/bootstrap_runtime/main.pic -o bootstrap_runtime.bin -rand-sections=false
+// ./harness/run_shellcode bootstrap_runtime.bin
+package main
+
+import "std/runtime"
+
+fn main(stackHint: *void) -> u64 {
+    if !runtime.Init(stackHint) {
+        return 1
+    }
+    if !runtime.Ready() {
+        return 2
+    }
+    p, err := runtime.Alloc(32)
+    if err != 0 {
+        return 3
+    }
+    runtime.Free(p)
+    if runtime.IsLinux() {
+        return 0
+    }
+    if runtime.IsWindows() {
+        return 0
+    }
+    return 4
+}
