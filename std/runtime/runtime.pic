@@ -1,0 +1,210 @@
+// Package runtime - dual-OS PIC runtime: detect OS, resolve heap, Alloc/Free.
+//
+// One shellcode works on Linux and Windows. Call Init(stack_hint) once from main
+// (stack_hint is the frame pointer passed by the entry stub).
+//
+// Higher packages (e.g. strings) only use Alloc/Free and stay OS-agnostic.
+// Fallible APIs return (value, *u8) where err == 0 means success.
+package runtime
+
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+type PVOID = *void
+type FnRtlAlloc = fn(PVOID, u32, u64) -> PVOID
+type FnRtlFree = fn(PVOID, u32, PVOID) -> u32
+
+const OS_UNKNOWN = 0
+const OS_LINUX = 1
+const OS_WINDOWS = 2
+
+// HEAP_ZERO_MEMORY for RtlAllocateHeap
+const HEAP_ZERO_MEMORY = 0x00000008
+
+struct State {
+    ready: u64
+    os: u64
+    stack_hint: PVOID
+    // Linux: libc malloc/free
+    // Windows: ntdll RtlAllocateHeap / RtlFreeHeap + ProcessHeap
+    heap: PVOID
+    fn_alloc: PVOID
+    fn_free: PVOID
+}
+
+var g: State
+
+// Init detects the OS, resolves heap APIs, and prepares Alloc/Free.
+// Pass the entry stack_hint (main's first argument) for Linux link_map discovery.
+// Returns true on success. On failure, Alloc will return a "not ready" error.
+fn Init(stack_hint: PVOID) -> bool {
+    if g.ready != 0 {
+        return g.os != OS_UNKNOWN
+    }
+    g.stack_hint = stack_hint
+    g.os = OS_UNKNOWN
+    g.heap = null
+    g.fn_alloc = null
+    g.fn_free = null
+
+    // Prefer Linux when stack_hint can prove link_map. On Linux, GS:[0x60] is often
+    // a valid TLS slot (not a PEB); following it as PEB will crash. So never try
+    // the Windows path first if Linux resolve works.
+    if stack_hint != null {
+        if lresolve.Probe(stack_hint) {
+            if init_linux(stack_hint) {
+                g.os = OS_LINUX
+                g.ready = 1
+                return true
+            }
+        }
+    }
+
+    // Secondary Linux signal: getpid syscall (39) without needing stack_hint.
+    // Success with a positive pid strongly suggests Linux before touching GS.
+    var pid: i64 = cast[i64](__syscall(39))
+    if pid > 0 {
+        if stack_hint != null {
+            if init_linux(stack_hint) {
+                g.os = OS_LINUX
+                g.ready = 1
+                return true
+            }
+        }
+    }
+
+    // Windows: PEB via GS:[0x60] (only if Linux paths did not claim the process).
+    if wresolve.Probe() {
+        if init_windows() {
+            g.os = OS_WINDOWS
+            g.ready = 1
+            return true
+        }
+    }
+
+    g.ready = 1
+    g.os = OS_UNKNOWN
+    return false
+}
+
+fn init_linux(stack_hint: PVOID) -> bool {
+    var H_LIBC6: u32 = __hash("libc.so.6")
+    var H_LIBC: u32 = __hash("libc.so")
+    var H_MALLOC: u32 = __hash("malloc")
+    var H_FREE: u32 = __hash("free")
+
+    var libc: PVOID = lresolve.Module(H_LIBC6, stack_hint)
+    if libc == null {
+        libc = lresolve.Module(H_LIBC, stack_hint)
+    }
+    if libc == null {
+        return false
+    }
+    g.fn_alloc = lresolve.Symbol(libc, H_MALLOC)
+    g.fn_free = lresolve.Symbol(libc, H_FREE)
+    if g.fn_alloc == null {
+        return false
+    }
+    if g.fn_free == null {
+        return false
+    }
+    return true
+}
+
+fn init_windows() -> bool {
+    var H_NTDLL: u32 = __hash("NTDLL.DLL")
+    var H_RTLALLOC: u32 = __hash("RtlAllocateHeap")
+    var H_RTLFREE: u32 = __hash("RtlFreeHeap")
+
+    var ntdll: PVOID = wresolve.Module(H_NTDLL)
+    if ntdll == null {
+        return false
+    }
+    g.heap = wresolve.ProcessHeap()
+    if g.heap == null {
+        return false
+    }
+    g.fn_alloc = wresolve.Symbol(ntdll, H_RTLALLOC)
+    g.fn_free = wresolve.Symbol(ntdll, H_RTLFREE)
+    if g.fn_alloc == null {
+        return false
+    }
+    if g.fn_free == null {
+        return false
+    }
+    return true
+}
+
+// IsLinux reports whether Init selected the Linux path.
+fn IsLinux() -> bool {
+    return g.os == OS_LINUX
+}
+
+// IsWindows reports whether Init selected the Windows path.
+fn IsWindows() -> bool {
+    return g.os == OS_WINDOWS
+}
+
+// Ready reports whether Init has completed successfully.
+fn Ready() -> bool {
+    if g.ready == 0 {
+        return false
+    }
+    return g.os != OS_UNKNOWN
+}
+
+// StackHint returns the pointer passed to Init (needed for Linux link_map resolve
+// in dependent packages such as std/file). Null if Init was never called with one.
+fn StackHint() -> PVOID {
+    return g.stack_hint
+}
+
+// Alloc returns n bytes of heap memory.
+// On success: (ptr, 0). On failure: (null, error string).
+// Linux: malloc; Windows: RtlAllocateHeap(ProcessHeap, HEAP_ZERO_MEMORY, n).
+// n == 0 is treated as 1.
+fn Alloc(n: u64) -> (PVOID, *u8) {
+    if !Ready() {
+        return null, "runtime: not ready"
+    }
+    if n == 0 {
+        n = 1
+    }
+    if g.os == OS_LINUX {
+        // malloc(size) SysV: rdi=n
+        var p: PVOID = cast[PVOID](__sysv_call(g.fn_alloc, n))
+        if p == null {
+            return null, "runtime: malloc failed"
+        }
+        return p, 0
+    }
+    if g.os == OS_WINDOWS {
+        // RtlAllocateHeap(HeapHandle, Flags, Size) - MS x64 calling convention
+        var f: FnRtlAlloc = cast[FnRtlAlloc](g.fn_alloc)
+        var p: PVOID = f(g.heap, HEAP_ZERO_MEMORY, n)
+        if p == null {
+            return null, "runtime: heap alloc failed"
+        }
+        return p, 0
+    }
+    return null, "runtime: unknown os"
+}
+
+// Free releases a block from Alloc. null is ignored.
+fn Free(p: PVOID) {
+    if p == null {
+        return
+    }
+    if !Ready() {
+        return
+    }
+    if g.os == OS_LINUX {
+        __sysv_call(g.fn_free, cast[u64](p))
+        return
+    }
+    if g.os == OS_WINDOWS {
+        // RtlFreeHeap(HeapHandle, Flags, BaseAddress)
+        var f: FnRtlFree = cast[FnRtlFree](g.fn_free)
+        f(g.heap, 0, p)
+    }
+}

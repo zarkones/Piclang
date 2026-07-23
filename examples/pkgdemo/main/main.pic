@@ -1,0 +1,19 @@
+// Package main - entry package for the multi-package demo.
+//
+// Build from repo root:
+//   picc examples/pkgdemo/main -o demo.bin -rand-sections=false -S
+//
+// Module root is examples/pkgdemo (parent of this package dir),
+// so import "mathx" loads examples/pkgdemo/mathx/*.pic
+package main
+
+import "mathx"
+
+fn main() -> u64 {
+    var s: *u8 = mathx.Greeting()
+    var n: u64 = __strlen(s)
+    var sum: u64 = mathx.Add(20, 22)
+    var prod: u64 = mathx.Mul(3, 7)
+    // sum=42, prod=21, n = len("hello from mathx") = 16
+    return sum + prod + n
+}

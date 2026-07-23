@@ -1,0 +1,29 @@
+// hello.pic - minimal PIC program demonstrating string placement.
+// Compile: picc examples/hello.pic -o hello.bin -S
+//
+// Strings are emitted into .rdata and addressed with RIP-relative LEA.
+// No stack-string hacks required.
+
+fn add(a: u64, b: u64) -> u64 {
+    return a + b
+}
+
+fn main() -> u64 {
+    // Normal string literal - compiler places it in the PIC blob.
+    var msg: *u8 = "Hello from Piclang"
+    var n: u64 = __strlen(msg)
+
+    // Base / size of the implant image itself
+    var base: u64 = __base()
+    var end: u64 = __end()
+    var size: u64 = end - base
+
+    // Compile-time djb2 hash (Stardust-style, uppercase)
+    var h: u32 = __hash("kernel32.dll")
+
+    var sum: u64 = add(n, size)
+    if h == 0 {
+        return 1
+    }
+    return sum
+}

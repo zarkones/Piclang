@@ -1,0 +1,858 @@
+// Package net - dual-OS IPv4 TCP client + DNS (no listen, no HTTP).
+//
+// Requires runtime.Init. Call net.Init() once (WSAStartup on Windows).
+// Conn is a socket fd (Linux) or SOCKET (Windows).
+//
+// IPs are "presentation order" u32: 127.0.0.1 == 0x7F000001 (first octet in high byte).
+package net
+
+import "std/runtime"
+import "std/mem"
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+type PVOID = *void
+type Conn = u64
+
+const INVALID: u64 = 0xFFFFFFFFFFFFFFFF
+
+// Shutdown how
+const SHUT_RD: u64 = 0
+const SHUT_WR: u64 = 1
+const SHUT_RDWR: u64 = 2
+
+// Linux
+const AF_INET: u64 = 2
+const SOCK_STREAM: u64 = 1
+const IPPROTO_TCP: u64 = 6
+const SOL_SOCKET: u64 = 1
+const SO_REUSEADDR: u64 = 2
+const SO_KEEPALIVE: u64 = 9
+const SO_RCVTIMEO: u64 = 20
+const SO_SNDTIMEO: u64 = 21
+const TCP_NODELAY: u64 = 1
+const IPPROTO_TCP_OPT: u64 = 6
+const SYS_SOCKET: u64 = 41
+const SYS_CONNECT: u64 = 42
+const SYS_SENDTO: u64 = 44
+const SYS_RECVFROM: u64 = 45
+const SYS_SHUTDOWN: u64 = 48
+const SYS_SETSOCKOPT: u64 = 54
+const SYS_CLOSE: u64 = 3
+
+// Windows SOCKET_ERROR
+const SOCKET_ERROR: i64 = -1
+const WSADATA_SIZE: u64 = 408 // enough for WSAData on x64
+
+type FnWSAStartup = fn(u16, PVOID) -> i32
+type FnWSACleanup = fn() -> i32
+type FnSocket = fn(i32, i32, i32) -> u64
+type FnConnect = fn(u64, PVOID, i32) -> i32
+type FnSend = fn(u64, PVOID, i32, i32) -> i32
+type FnRecv = fn(u64, PVOID, i32, i32) -> i32
+type FnClosesocket = fn(u64) -> i32
+type FnShutdown = fn(u64, i32) -> i32
+type FnSetsockopt = fn(u64, i32, i32, PVOID, i32) -> i32
+type FnGetaddrinfo = fn(*u8, *u8, PVOID, PVOID) -> i32
+type FnFreeaddrinfo = fn(PVOID) -> void
+
+struct State {
+    ready: u64
+    // Linux libc DNS
+    getaddrinfo: PVOID
+    freeaddrinfo: PVOID
+    // Windows
+    wsa_startup: PVOID
+    wsa_cleanup: PVOID
+    socket: PVOID
+    connect: PVOID
+    send: PVOID
+    recv: PVOID
+    closesocket: PVOID
+    shutdown: PVOID
+    setsockopt: PVOID
+    getaddrinfo_w: PVOID
+    freeaddrinfo_w: PVOID
+}
+
+var g: State
+
+// ---- byte order (amd64 little-endian host) ----
+
+fn htons(p: u64) -> u16 {
+    var x: u64 = p & 0xFFFF
+    return cast[u16](((x & 0xFF) << 8) | ((x >> 8) & 0xFF))
+}
+
+fn htonl(h: u32) -> u32 {
+    var x: u64 = cast[u64](h)
+    var a: u64 = (x & 0xFF) << 24
+    var b: u64 = (x & 0xFF00) << 8
+    var c: u64 = (x & 0xFF0000) >> 8
+    var d: u64 = (x >> 24) & 0xFF
+    return cast[u32](a | b | c | d)
+}
+
+fn ntohl(n: u32) -> u32 {
+    return htonl(n) // same swap
+}
+
+// ---- Init ----
+
+fn Init() -> *u8 {
+    if g.ready != 0 {
+        return 0
+    }
+    if !runtime.Ready() {
+        return "net: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        return init_linux()
+    }
+    if runtime.IsWindows() {
+        return init_windows()
+    }
+    return "net: unknown os"
+}
+
+fn init_linux() -> *u8 {
+    var hint: PVOID = runtime.StackHint()
+    var libc: PVOID = lresolve.Module(__hash("libc.so.6"), hint)
+    if libc == null {
+        libc = lresolve.Module(__hash("libc.so"), hint)
+    }
+    if libc == null {
+        return "net: resolve failed"
+    }
+    g.getaddrinfo = lresolve.Symbol(libc, __hash("getaddrinfo"))
+    g.freeaddrinfo = lresolve.Symbol(libc, __hash("freeaddrinfo"))
+    if g.getaddrinfo == null {
+        return "net: resolve failed"
+    }
+    g.ready = 1
+    return 0
+}
+
+fn init_windows() -> *u8 {
+    var ws: PVOID = wresolve.Module(__hash("WS2_32.DLL"))
+    if ws == null {
+        ws = wresolve.Module(__hash("ws2_32.dll"))
+    }
+    if ws == null {
+        return "net: resolve failed"
+    }
+    g.wsa_startup = wresolve.Symbol(ws, __hash("WSAStartup"))
+    g.wsa_cleanup = wresolve.Symbol(ws, __hash("WSACleanup"))
+    g.socket = wresolve.Symbol(ws, __hash("socket"))
+    g.connect = wresolve.Symbol(ws, __hash("connect"))
+    g.send = wresolve.Symbol(ws, __hash("send"))
+    g.recv = wresolve.Symbol(ws, __hash("recv"))
+    g.closesocket = wresolve.Symbol(ws, __hash("closesocket"))
+    g.shutdown = wresolve.Symbol(ws, __hash("shutdown"))
+    g.setsockopt = wresolve.Symbol(ws, __hash("setsockopt"))
+    g.getaddrinfo_w = wresolve.Symbol(ws, __hash("getaddrinfo"))
+    g.freeaddrinfo_w = wresolve.Symbol(ws, __hash("freeaddrinfo"))
+    if g.wsa_startup == null {
+        return "net: resolve failed"
+    }
+    if g.socket == null {
+        return "net: resolve failed"
+    }
+    // WSAStartup(MAKEWORD(2,2), &wsaData)
+    var wsa: [408]u8
+    var i: u64 = 0
+    while i < 408 {
+        wsa[i] = 0
+        i = i + 1
+    }
+    var f: FnWSAStartup = cast[FnWSAStartup](g.wsa_startup)
+    var ver: u16 = 0x0202
+    if f(ver, cast[PVOID](&wsa[0])) != 0 {
+        return "net: wsa failed"
+    }
+    g.ready = 1
+    return 0
+}
+
+fn ensure() -> *u8 {
+    if g.ready != 0 {
+        return 0
+    }
+    return Init()
+}
+
+fn IsValid(c: Conn) -> bool {
+    if c == INVALID {
+        return false
+    }
+    if c == 0 {
+        // Windows INVALID_SOCKET is ~0; Linux fd 0 is stdin - we never return 0 as Conn from Dial
+        return false
+    }
+    return true
+}
+
+// ---- ParseIP / IPToString ----
+
+fn dig(c: u8) -> i64 {
+    if c >= 48 {
+        if c <= 57 {
+            return cast[i64](c - 48)
+        }
+    }
+    return -1
+}
+
+// ParseIP parses "a.b.c.d" into presentation-order u32 (0xAABBCCDD).
+fn ParseIP(s: *u8) -> (u32, *u8) {
+    if s == null {
+        return 0, "net: bad address"
+    }
+    var parts: [4]u64
+    var pi: u64 = 0
+    var i: u64 = 0
+    var cur: u64 = 0
+    var digits: u64 = 0
+    while 1 {
+        var c: u8 = *(s + i)
+        if c == 0 {
+            if digits == 0 {
+                return 0, "net: bad address"
+            }
+            if pi != 3 {
+                return 0, "net: bad address"
+            }
+            parts[pi] = cur
+            break
+        }
+        if c == 46 {
+            if digits == 0 {
+                return 0, "net: bad address"
+            }
+            if pi >= 3 {
+                return 0, "net: bad address"
+            }
+            parts[pi] = cur
+            pi = pi + 1
+            cur = 0
+            digits = 0
+            i = i + 1
+            continue
+        }
+        var d: i64 = dig(c)
+        if d < 0 {
+            return 0, "net: bad address"
+        }
+        cur = cur * 10 + cast[u64](d)
+        if cur > 255 {
+            return 0, "net: bad address"
+        }
+        digits = digits + 1
+        i = i + 1
+    }
+    var ip: u32 = cast[u32]((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3])
+    return ip, 0
+}
+
+fn FreeStr(p: *u8) {
+    runtime.Free(cast[*void](p))
+}
+
+// IPToString formats presentation-order IP as "a.b.c.d". Caller FreeStr.
+fn IPToString(ip: u32) -> (*u8, *u8) {
+    var a: u64 = cast[u64]((ip >> 24) & 0xFF)
+    var b: u64 = cast[u64]((ip >> 16) & 0xFF)
+    var c: u64 = cast[u64]((ip >> 8) & 0xFF)
+    var d: u64 = cast[u64](ip & 0xFF)
+    // max "255.255.255.255" = 15 + NUL
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(16)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var di: u64 = 0
+    di = write_u8_dec(out, di, a)
+    *(out + di) = 46
+    di = di + 1
+    di = write_u8_dec(out, di, b)
+    *(out + di) = 46
+    di = di + 1
+    di = write_u8_dec(out, di, c)
+    *(out + di) = 46
+    di = di + 1
+    di = write_u8_dec(out, di, d)
+    *(out + di) = 0
+    return out, 0
+}
+
+fn write_u8_dec(out: *u8, di: u64, v: u64) -> u64 {
+    if v >= 100 {
+        *(out + di) = cast[u8](48 + v / 100)
+        di = di + 1
+        v = v % 100
+        *(out + di) = cast[u8](48 + v / 10)
+        di = di + 1
+        *(out + di) = cast[u8](48 + v % 10)
+        return di + 1
+    }
+    if v >= 10 {
+        *(out + di) = cast[u8](48 + v / 10)
+        di = di + 1
+        *(out + di) = cast[u8](48 + v % 10)
+        return di + 1
+    }
+    *(out + di) = cast[u8](48 + v)
+    return di + 1
+}
+
+// ---- sockaddr helpers ----
+
+fn fill_sockaddr_in(sa: *u8, ip: u32, port: u64) {
+    // zero 16 bytes
+    var i: u64 = 0
+    while i < 16 {
+        *(sa + i) = 0
+        i = i + 1
+    }
+    __store16(cast[*void](sa), AF_INET)
+    __store16(cast[*void](sa + 2), cast[u64](htons(port)))
+    __store32(cast[*void](sa + 4), cast[u64](htonl(ip)))
+}
+
+// ---- DialIP / socket ops ----
+
+fn DialIP(ip: u32, port: u64) -> (Conn, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return INVALID, err
+    }
+    if port > 65535 {
+        return INVALID, "net: bad port"
+    }
+    if runtime.IsLinux() {
+        return dial_ip_linux(ip, port)
+    }
+    if runtime.IsWindows() {
+        return dial_ip_windows(ip, port)
+    }
+    return INVALID, "net: unknown os"
+}
+
+fn dial_ip_linux(ip: u32, port: u64) -> (Conn, *u8) {
+    var fd: i64 = cast[i64](__syscall(SYS_SOCKET, AF_INET, SOCK_STREAM, 0))
+    if fd < 0 {
+        return INVALID, "net: socket failed"
+    }
+    var sa: [16]u8
+    fill_sockaddr_in(&sa[0], ip, port)
+    var rc: i64 = cast[i64](__syscall(SYS_CONNECT, cast[u64](fd), cast[u64](&sa[0]), 16))
+    if rc < 0 {
+        __syscall(SYS_CLOSE, cast[u64](fd))
+        return INVALID, "net: connect failed"
+    }
+    return cast[Conn](fd), 0
+}
+
+fn dial_ip_windows(ip: u32, port: u64) -> (Conn, *u8) {
+    var fsock: FnSocket = cast[FnSocket](g.socket)
+    var s: u64 = fsock(cast[i32](AF_INET), cast[i32](SOCK_STREAM), cast[i32](IPPROTO_TCP))
+    if s == INVALID {
+        return INVALID, "net: socket failed"
+    }
+    var sa: [16]u8
+    fill_sockaddr_in(&sa[0], ip, port)
+    var fconn: FnConnect = cast[FnConnect](g.connect)
+    if fconn(s, cast[PVOID](&sa[0]), 16) != 0 {
+        var fcl: FnClosesocket = cast[FnClosesocket](g.closesocket)
+        fcl(s)
+        return INVALID, "net: connect failed"
+    }
+    return s, 0
+}
+
+// ---- DNS ----
+
+// Resolve returns first IPv4 for host (presentation order), or ParseIP if already dotted.
+fn Resolve(host: *u8) -> (u32, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if host == null {
+        return 0, "net: bad address"
+    }
+    // try dotted first
+    var ip: u32
+    var e2: *u8
+    ip, e2 = ParseIP(host)
+    if e2 == 0 {
+        return ip, 0
+    }
+    if runtime.IsLinux() {
+        return resolve_linux(host)
+    }
+    if runtime.IsWindows() {
+        return resolve_windows(host)
+    }
+    return 0, "net: unknown os"
+}
+
+// Linux addrinfo is 48 bytes; ai_addr at +24, ai_next at +40
+// sockaddr_in sin_addr at +4 from sockaddr
+fn resolve_linux(host: *u8) -> (u32, *u8) {
+    var hints: [48]u8
+    var i: u64 = 0
+    while i < 48 {
+        hints[i] = 0
+        i = i + 1
+    }
+    __store32(cast[*void](&hints[0] + 4), AF_INET)       // ai_family
+    __store32(cast[*void](&hints[0] + 8), SOCK_STREAM) // ai_socktype
+    var res: PVOID = null
+    var rc: i64 = cast[i64](__sysv_call(g.getaddrinfo, cast[u64](host), 0, cast[u64](&hints[0]), cast[u64](&res)))
+    if rc != 0 {
+        return 0, "net: dns failed"
+    }
+    if res == null {
+        return 0, "net: dns failed"
+    }
+    // walk list for AF_INET
+    var cur: u64 = cast[u64](res)
+    var found: u32 = 0
+    var ok: u64 = 0
+    while cur != 0 {
+        var family: u32 = __load32(cast[*void](cur + 4))
+        var addr: u64 = __load64(cast[*void](cur + 24))
+        if family == cast[u32](AF_INET) {
+            if addr != 0 {
+                var netip: u32 = __load32(cast[*void](addr + 4))
+                found = ntohl(netip)
+                ok = 1
+                break
+            }
+        }
+        cur = __load64(cast[*void](cur + 40))
+    }
+    if g.freeaddrinfo != null {
+        __sysv_call(g.freeaddrinfo, cast[u64](res))
+    }
+    if ok == 0 {
+        return 0, "net: dns failed"
+    }
+    return found, 0
+}
+
+fn resolve_windows(host: *u8) -> (u32, *u8) {
+    // same addrinfo layout on Win64
+    var hints: [48]u8
+    var i: u64 = 0
+    while i < 48 {
+        hints[i] = 0
+        i = i + 1
+    }
+    __store32(cast[*void](&hints[0] + 4), AF_INET)
+    __store32(cast[*void](&hints[0] + 8), SOCK_STREAM)
+    var res: PVOID = null
+    var f: FnGetaddrinfo = cast[FnGetaddrinfo](g.getaddrinfo_w)
+    if f(host, null, cast[PVOID](&hints[0]), cast[PVOID](&res)) != 0 {
+        return 0, "net: dns failed"
+    }
+    if res == null {
+        return 0, "net: dns failed"
+    }
+    var cur: u64 = cast[u64](res)
+    var found: u32 = 0
+    var ok: u64 = 0
+    while cur != 0 {
+        var family: u32 = __load32(cast[*void](cur + 4))
+        var addr: u64 = __load64(cast[*void](cur + 24))
+        if family == cast[u32](AF_INET) {
+            if addr != 0 {
+                var netip: u32 = __load32(cast[*void](addr + 4))
+                found = ntohl(netip)
+                ok = 1
+                break
+            }
+        }
+        cur = __load64(cast[*void](cur + 40))
+    }
+    if g.freeaddrinfo_w != null {
+        var ff: FnFreeaddrinfo = cast[FnFreeaddrinfo](g.freeaddrinfo_w)
+        ff(res)
+    }
+    if ok == 0 {
+        return 0, "net: dns failed"
+    }
+    return found, 0
+}
+
+// ResolveAll fills out[0..max) with presentation-order IPv4s. Returns count.
+fn ResolveAll(host: *u8, out: *u32, max: u64) -> (u64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if host == null || out == null || max == 0 {
+        return 0, "net: bad address"
+    }
+    // dotted single
+    var one: u32
+    var e2: *u8
+    one, e2 = ParseIP(host)
+    if e2 == 0 {
+        *out = one
+        return 1, 0
+    }
+    if runtime.IsLinux() {
+        return resolve_all_linux(host, out, max)
+    }
+    if runtime.IsWindows() {
+        return resolve_all_windows(host, out, max)
+    }
+    return 0, "net: unknown os"
+}
+
+fn resolve_all_linux(host: *u8, out: *u32, max: u64) -> (u64, *u8) {
+    var hints: [48]u8
+    var i: u64 = 0
+    while i < 48 {
+        hints[i] = 0
+        i = i + 1
+    }
+    __store32(cast[*void](&hints[0] + 4), AF_INET)
+    __store32(cast[*void](&hints[0] + 8), SOCK_STREAM)
+    var res: PVOID = null
+    if cast[i64](__sysv_call(g.getaddrinfo, cast[u64](host), 0, cast[u64](&hints[0]), cast[u64](&res))) != 0 {
+        return 0, "net: dns failed"
+    }
+    var n: u64 = 0
+    var cur: u64 = cast[u64](res)
+    while cur != 0 {
+        if n >= max {
+            break
+        }
+        var family: u32 = __load32(cast[*void](cur + 4))
+        var addr: u64 = __load64(cast[*void](cur + 24))
+        if family == cast[u32](AF_INET) {
+            if addr != 0 {
+                var netip: u32 = __load32(cast[*void](addr + 4))
+                *(out + n) = ntohl(netip)
+                n = n + 1
+            }
+        }
+        cur = __load64(cast[*void](cur + 40))
+    }
+    if g.freeaddrinfo != null {
+        __sysv_call(g.freeaddrinfo, cast[u64](res))
+    }
+    if n == 0 {
+        return 0, "net: dns failed"
+    }
+    return n, 0
+}
+
+fn resolve_all_windows(host: *u8, out: *u32, max: u64) -> (u64, *u8) {
+    var hints: [48]u8
+    var i: u64 = 0
+    while i < 48 {
+        hints[i] = 0
+        i = i + 1
+    }
+    __store32(cast[*void](&hints[0] + 4), AF_INET)
+    __store32(cast[*void](&hints[0] + 8), SOCK_STREAM)
+    var res: PVOID = null
+    var f: FnGetaddrinfo = cast[FnGetaddrinfo](g.getaddrinfo_w)
+    if f(host, null, cast[PVOID](&hints[0]), cast[PVOID](&res)) != 0 {
+        return 0, "net: dns failed"
+    }
+    var n: u64 = 0
+    var cur: u64 = cast[u64](res)
+    while cur != 0 {
+        if n >= max {
+            break
+        }
+        var family: u32 = __load32(cast[*void](cur + 4))
+        var addr: u64 = __load64(cast[*void](cur + 24))
+        if family == cast[u32](AF_INET) {
+            if addr != 0 {
+                var netip: u32 = __load32(cast[*void](addr + 4))
+                *(out + n) = ntohl(netip)
+                n = n + 1
+            }
+        }
+        cur = __load64(cast[*void](cur + 40))
+    }
+    if g.freeaddrinfo_w != null {
+        var ff: FnFreeaddrinfo = cast[FnFreeaddrinfo](g.freeaddrinfo_w)
+        ff(res)
+    }
+    if n == 0 {
+        return 0, "net: dns failed"
+    }
+    return n, 0
+}
+
+// Dial resolves host and connects to the first working IPv4:port.
+fn Dial(host: *u8, port: u64) -> (Conn, *u8) {
+    var ips: [8]u32
+    var n: u64
+    var err: *u8
+    n, err = ResolveAll(host, &ips[0], 8)
+    if err != 0 {
+        return INVALID, err
+    }
+    var i: u64 = 0
+    var last: *u8 = "net: connect failed"
+    while i < n {
+        var c: Conn
+        c, err = DialIP(ips[i], port)
+        if err == 0 {
+            return c, 0
+        }
+        last = err
+        i = i + 1
+    }
+    return INVALID, last
+}
+
+// ---- Read / Write ----
+
+fn Write(c: Conn, buf: *u8, n: u64) -> (u64, *u8) {
+    if !IsValid(c) {
+        return 0, "net: invalid conn"
+    }
+    if n == 0 {
+        return 0, 0
+    }
+    if buf == null {
+        return 0, "net: null buffer"
+    }
+    if runtime.IsLinux() {
+        // write(fd, buf, n) - syscall 1
+        var rc: i64 = cast[i64](__syscall(1, c, cast[u64](buf), n))
+        if rc < 0 {
+            return 0, "net: send failed"
+        }
+        return cast[u64](rc), 0
+    }
+    if runtime.IsWindows() {
+        var f: FnSend = cast[FnSend](g.send)
+        var rc: i32 = f(c, cast[PVOID](buf), cast[i32](n), 0)
+        if cast[i64](rc) < 0 {
+            return 0, "net: send failed"
+        }
+        return cast[u64](rc), 0
+    }
+    return 0, "net: unknown os"
+}
+
+fn WriteAll(c: Conn, buf: *u8, n: u64) -> *u8 {
+    var off: u64 = 0
+    while off < n {
+        var nw: u64
+        var err: *u8
+        nw, err = Write(c, buf + off, n - off)
+        if err != 0 {
+            return err
+        }
+        if nw == 0 {
+            return "net: send failed"
+        }
+        off = off + nw
+    }
+    return 0
+}
+
+fn Read(c: Conn, buf: *u8, n: u64) -> (u64, *u8) {
+    if !IsValid(c) {
+        return 0, "net: invalid conn"
+    }
+    if n == 0 {
+        return 0, 0
+    }
+    if buf == null {
+        return 0, "net: null buffer"
+    }
+    if runtime.IsLinux() {
+        var rc: i64 = cast[i64](__syscall(0, c, cast[u64](buf), n)) // read
+        if rc < 0 {
+            return 0, "net: recv failed"
+        }
+        return cast[u64](rc), 0
+    }
+    if runtime.IsWindows() {
+        var f: FnRecv = cast[FnRecv](g.recv)
+        var rc: i32 = f(c, cast[PVOID](buf), cast[i32](n), 0)
+        if cast[i64](rc) < 0 {
+            return 0, "net: recv failed"
+        }
+        return cast[u64](rc), 0
+    }
+    return 0, "net: unknown os"
+}
+
+fn ReadFull(c: Conn, buf: *u8, n: u64) -> *u8 {
+    var off: u64 = 0
+    while off < n {
+        var nr: u64
+        var err: *u8
+        nr, err = Read(c, buf + off, n - off)
+        if err != 0 {
+            return err
+        }
+        if nr == 0 {
+            return "net: unexpected eof"
+        }
+        off = off + nr
+    }
+    return 0
+}
+
+// ---- Close / Shutdown ----
+
+fn Close(c: Conn) -> *u8 {
+    if !IsValid(c) {
+        return 0
+    }
+    if runtime.IsLinux() {
+        if cast[i64](__syscall(SYS_CLOSE, c)) < 0 {
+            return "net: close failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var f: FnClosesocket = cast[FnClosesocket](g.closesocket)
+        if f(c) != 0 {
+            return "net: close failed"
+        }
+        return 0
+    }
+    return "net: unknown os"
+}
+
+fn Shutdown(c: Conn, how: u64) -> *u8 {
+    if !IsValid(c) {
+        return "net: invalid conn"
+    }
+    if runtime.IsLinux() {
+        if cast[i64](__syscall(SYS_SHUTDOWN, c, how)) < 0 {
+            return "net: shutdown failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var f: FnShutdown = cast[FnShutdown](g.shutdown)
+        if f(c, cast[i32](how)) != 0 {
+            return "net: shutdown failed"
+        }
+        return 0
+    }
+    return "net: unknown os"
+}
+
+// ---- Socket options ----
+
+fn setsockopt_int(c: Conn, level: u64, opt: u64, val: i32) -> *u8 {
+    if !IsValid(c) {
+        return "net: invalid conn"
+    }
+    var v: i32 = val
+    if runtime.IsLinux() {
+        if cast[i64](__syscall(SYS_SETSOCKOPT, c, level, opt, cast[u64](&v), 4)) < 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var f: FnSetsockopt = cast[FnSetsockopt](g.setsockopt)
+        if f(c, cast[i32](level), cast[i32](opt), cast[PVOID](&v), 4) != 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    return "net: unknown os"
+}
+
+fn SetNoDelay(c: Conn, on: bool) -> *u8 {
+    var v: i32 = 0
+    if on {
+        v = 1
+    }
+    // IPPROTO_TCP=6, TCP_NODELAY=1 (same on Linux and Windows)
+    return setsockopt_int(c, 6, 1, v)
+}
+
+fn SetKeepAlive(c: Conn, on: bool) -> *u8 {
+    var v: i32 = 0
+    if on {
+        v = 1
+    }
+    return setsockopt_int(c, SOL_SOCKET, SO_KEEPALIVE, v)
+}
+
+fn SetReuseAddr(c: Conn, on: bool) -> *u8 {
+    var v: i32 = 0
+    if on {
+        v = 1
+    }
+    return setsockopt_int(c, SOL_SOCKET, SO_REUSEADDR, v)
+}
+
+// SetRecvTimeout sets SO_RCVTIMEO in milliseconds (0 = no timeout).
+fn SetRecvTimeout(c: Conn, ms: u64) -> *u8 {
+    if !IsValid(c) {
+        return "net: invalid conn"
+    }
+    if runtime.IsLinux() {
+        // struct timeval { sec i64; usec i64 }
+        var tv: [16]u8
+        var sec: u64 = ms / 1000
+        var usec: u64 = (ms % 1000) * 1000
+        __store64(cast[*void](&tv[0]), sec)
+        __store64(cast[*void](&tv[0] + 8), usec)
+        if cast[i64](__syscall(SYS_SETSOCKOPT, c, SOL_SOCKET, SO_RCVTIMEO, cast[u64](&tv[0]), 16)) < 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        // DWORD ms
+        var v: u32 = cast[u32](ms)
+        var f: FnSetsockopt = cast[FnSetsockopt](g.setsockopt)
+        // SO_RCVTIMEO = 0x1006 on Windows
+        if f(c, cast[i32](SOL_SOCKET), cast[i32](0x1006), cast[PVOID](&v), 4) != 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    return "net: unknown os"
+}
+
+fn SetSendTimeout(c: Conn, ms: u64) -> *u8 {
+    if !IsValid(c) {
+        return "net: invalid conn"
+    }
+    if runtime.IsLinux() {
+        var tv: [16]u8
+        var sec: u64 = ms / 1000
+        var usec: u64 = (ms % 1000) * 1000
+        __store64(cast[*void](&tv[0]), sec)
+        __store64(cast[*void](&tv[0] + 8), usec)
+        if cast[i64](__syscall(SYS_SETSOCKOPT, c, SOL_SOCKET, SO_SNDTIMEO, cast[u64](&tv[0]), 16)) < 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var v: u32 = cast[u32](ms)
+        var f: FnSetsockopt = cast[FnSetsockopt](g.setsockopt)
+        // SO_SNDTIMEO = 0x1005
+        if f(c, cast[i32](SOL_SOCKET), cast[i32](0x1005), cast[PVOID](&v), 4) != 0 {
+            return "net: setsockopt failed"
+        }
+        return 0
+    }
+    return "net: unknown os"
+}

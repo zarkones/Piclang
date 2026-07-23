@@ -1,0 +1,287 @@
+// Package path - dual-OS path helpers for *u8 C strings (Go path/filepath-lite).
+// Allocating functions return heap strings; caller runtime.Free / path.Free.
+// Requires runtime.Init for Windows separator detection (defaults to '/').
+package path
+
+import "std/runtime"
+import "std/mem"
+
+const MAX_PATH: u64 = 4096
+
+fn Free(p: *u8) {
+    runtime.Free(cast[*void](p))
+}
+
+// Separator returns '/' or '\\' based on runtime OS (default '/').
+fn Separator() -> u8 {
+    if runtime.IsWindows() {
+        return 92 // '\\'
+    }
+    return 47 // '/'
+}
+
+fn is_sep(c: u8) -> bool {
+    if c == 47 {
+        return true
+    }
+    if c == 92 {
+        return true
+    }
+    return false
+}
+
+fn strlen(s: *u8) -> u64 {
+    if s == null {
+        return 0
+    }
+    return __strlen(s)
+}
+
+fn alloc_copy(s: *u8, n: u64) -> (*u8, *u8) {
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(n + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    if n > 0 && s != null {
+        mem.Copy(cast[*void](out), cast[*void](s), n)
+    }
+    *(out + n) = 0
+    return out, 0
+}
+
+// IsAbs reports absolute path (Unix /…, Windows X:\ or \\).
+fn IsAbs(p: *u8) -> bool {
+    if p == null {
+        return false
+    }
+    if *p == 0 {
+        return false
+    }
+    if runtime.IsWindows() {
+        // UNC \\
+        if *p == 92 {
+            if *(p + 1) == 92 {
+                return true
+            }
+        }
+        // drive letter
+        var c0: u8 = *p
+        var letter: u64 = 0
+        if c0 >= 65 {
+            if c0 <= 90 {
+                letter = 1
+            }
+        }
+        if c0 >= 97 {
+            if c0 <= 122 {
+                letter = 1
+            }
+        }
+        if letter != 0 {
+            if *(p + 1) == 58 {
+                if is_sep(*(p + 2)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+    return *p == 47
+}
+
+// Base returns the last path element (new heap string).
+fn Base(p: *u8) -> (*u8, *u8) {
+    if p == null {
+        return alloc_copy(cast[*u8](null), 0)
+    }
+    var n: u64 = strlen(p)
+    if n == 0 {
+        return alloc_copy(p, 0)
+    }
+    // strip trailing seps
+    while n > 0 {
+        if !is_sep(*(p + n - 1)) {
+            break
+        }
+        n = n - 1
+    }
+    if n == 0 {
+        // path was all seps
+        var sep: u8 = Separator()
+        var one: [2]u8
+        one[0] = sep
+        one[1] = 0
+        return alloc_copy(&one[0], 1)
+    }
+    var i: u64 = n
+    while i > 0 {
+        if is_sep(*(p + i - 1)) {
+            return alloc_copy(p + i, n - i)
+        }
+        i = i - 1
+    }
+    return alloc_copy(p, n)
+}
+
+// Dir returns all but the last element (new heap string).
+fn Dir(p: *u8) -> (*u8, *u8) {
+    if p == null {
+        return alloc_copy(cast[*u8](null), 0)
+    }
+    var n: u64 = strlen(p)
+    if n == 0 {
+        var dot: [2]u8
+        dot[0] = 46
+        dot[1] = 0
+        return alloc_copy(&dot[0], 1)
+    }
+    while n > 0 {
+        if !is_sep(*(p + n - 1)) {
+            break
+        }
+        n = n - 1
+    }
+    var i: u64 = n
+    while i > 0 {
+        if is_sep(*(p + i - 1)) {
+            // keep trailing sep for root "/"
+            if i == 1 {
+                return alloc_copy(p, 1)
+            }
+            // Windows root "C:\"
+            if i == 3 {
+                if *(p + 1) == 58 {
+                    return alloc_copy(p, 3)
+                }
+            }
+            return alloc_copy(p, i - 1)
+        }
+        i = i - 1
+    }
+    var dot2: [2]u8
+    dot2[0] = 46
+    dot2[1] = 0
+    return alloc_copy(&dot2[0], 1)
+}
+
+// Ext returns the extension including dot, or empty string.
+fn Ext(p: *u8) -> (*u8, *u8) {
+    var base: *u8
+    var err: *u8
+    base, err = Base(p)
+    if err != 0 {
+        return null, err
+    }
+    var n: u64 = strlen(base)
+    var i: u64 = n
+    while i > 0 {
+        var c: u8 = *(base + i - 1)
+        if c == 46 {
+            var out: *u8
+            out, err = alloc_copy(base + i - 1, n - (i - 1))
+            Free(base)
+            return out, err
+        }
+        if is_sep(c) {
+            break
+        }
+        i = i - 1
+    }
+    Free(base)
+    return alloc_copy(cast[*u8](null), 0)
+}
+
+// Join joins a and b with the OS separator (new heap string).
+fn Join(a: *u8, b: *u8) -> (*u8, *u8) {
+    var na: u64 = strlen(a)
+    var nb: u64 = strlen(b)
+    if na == 0 {
+        return alloc_copy(b, nb)
+    }
+    if nb == 0 {
+        return alloc_copy(a, na)
+    }
+    // if b is abs, return b
+    if IsAbs(b) {
+        return alloc_copy(b, nb)
+    }
+    var need_sep: u64 = 1
+    if is_sep(*(a + na - 1)) {
+        need_sep = 0
+    }
+    var total: u64 = na + need_sep + nb
+    if total > MAX_PATH {
+        return null, "path: too long"
+    }
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(total + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    mem.Copy(cast[*void](out), cast[*void](a), na)
+    var di: u64 = na
+    if need_sep != 0 {
+        *(out + di) = Separator()
+        di = di + 1
+    }
+    mem.Copy(cast[*void](out + di), cast[*void](b), nb)
+    *(out + total) = 0
+    return out, 0
+}
+
+// Clean collapses repeated separators and trailing sep (except root). Light clean.
+fn Clean(p: *u8) -> (*u8, *u8) {
+    if p == null {
+        return alloc_copy(cast[*u8](null), 0)
+    }
+    var n: u64 = strlen(p)
+    if n == 0 {
+        var dot: [2]u8
+        dot[0] = 46
+        dot[1] = 0
+        return alloc_copy(&dot[0], 1)
+    }
+    if n > MAX_PATH {
+        return null, "path: too long"
+    }
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(n + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var di: u64 = 0
+    var i: u64 = 0
+    var last_sep: u64 = 0
+    while i < n {
+        var c: u8 = *(p + i)
+        if is_sep(c) {
+            // normalize to Separator()
+            c = Separator()
+            if last_sep != 0 && di > 0 {
+                i = i + 1
+                continue
+            }
+            last_sep = 1
+        } else {
+            last_sep = 0
+        }
+        *(out + di) = c
+        di = di + 1
+        i = i + 1
+    }
+    // strip trailing sep unless root
+    if di > 1 {
+        if is_sep(*(out + di - 1)) {
+            di = di - 1
+        }
+    }
+    *(out + di) = 0
+    return out, 0
+}

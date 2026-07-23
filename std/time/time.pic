@@ -1,0 +1,220 @@
+// Package time - dual-OS clocks and sleep (Go Duration-like, nanoseconds as i64).
+// Requires runtime.Init first.
+package time
+
+import "std/runtime"
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+type PVOID = *void
+type Duration = i64
+
+const Nanosecond: Duration = 1
+const Microsecond: Duration = 1000
+const Millisecond: Duration = 1000000
+const Second: Duration = 1000000000
+const Minute: Duration = 60000000000
+const Hour: Duration = 3600000000000
+
+// Linux
+const CLOCK_REALTIME: u64 = 0
+const CLOCK_MONOTONIC: u64 = 1
+const SYS_NANOSLEEP: u64 = 35
+const SYS_CLOCK_GETTIME: u64 = 228
+
+// Windows FILETIME → Unix: 100ns intervals; epoch delta
+const FILETIME_UNIX_DELTA: u64 = 116444736000000000
+
+type FnSleep = fn(u32) -> void
+type FnGetSystemTimeAsFileTime = fn(PVOID) -> void
+type FnQueryPerformanceCounter = fn(*i64) -> u32
+type FnQueryPerformanceFrequency = fn(*i64) -> u32
+
+struct State {
+    ready: u64
+    sleep: PVOID
+    get_filetime: PVOID
+    qpc: PVOID
+    qpf: PVOID
+    qpf_val: i64
+}
+
+var g: State
+
+fn ensure() -> *u8 {
+    if g.ready != 0 {
+        return 0
+    }
+    if !runtime.Ready() {
+        return "time: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        g.ready = 1
+        return 0
+    }
+    if runtime.IsWindows() {
+        var k32: PVOID = wresolve.Module(__hash("KERNEL32.DLL"))
+        if k32 == null {
+            return "time: resolve failed"
+        }
+        g.sleep = wresolve.Symbol(k32, __hash("Sleep"))
+        g.get_filetime = wresolve.Symbol(k32, __hash("GetSystemTimeAsFileTime"))
+        g.qpc = wresolve.Symbol(k32, __hash("QueryPerformanceCounter"))
+        g.qpf = wresolve.Symbol(k32, __hash("QueryPerformanceFrequency"))
+        if g.sleep == null {
+            return "time: resolve failed"
+        }
+        if g.get_filetime == null {
+            return "time: resolve failed"
+        }
+        if g.qpc != null {
+            if g.qpf != null {
+                var freq: i64 = 0
+                var f: FnQueryPerformanceFrequency = cast[FnQueryPerformanceFrequency](g.qpf)
+                if f(&freq) != 0 {
+                    g.qpf_val = freq
+                }
+            }
+        }
+        g.ready = 1
+        return 0
+    }
+    return "time: unknown os"
+}
+
+// Unix builds nanoseconds from sec + nsec.
+fn Unix(sec: i64, nsec: i64) -> i64 {
+    return sec * Second + nsec
+}
+
+// UnixSec returns whole seconds of a Unix-ns timestamp.
+fn UnixSec(ns: i64) -> i64 {
+    return ns / Second
+}
+
+// UnixNano is identity (timestamps are already ns).
+fn UnixNano(ns: i64) -> i64 {
+    return ns
+}
+
+// Sleep pauses for at least d nanoseconds.
+fn Sleep(d: Duration) -> *u8 {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return err
+    }
+    if d <= 0 {
+        return 0
+    }
+    if runtime.IsLinux() {
+        // struct timespec { tv_sec i64; tv_nsec i64 }
+        var ts: [16]u8
+        var sec: i64 = d / Second
+        var nsec: i64 = d % Second
+        __store64(cast[*void](&ts[0]), cast[u64](sec))
+        __store64(cast[*void](&ts[0] + 8), cast[u64](nsec))
+        // nanosleep(req, rem) - rem null
+        var rc: i64 = cast[i64](__syscall(SYS_NANOSLEEP, cast[u64](&ts[0]), 0))
+        if rc < 0 {
+            // EINTR = -4; ignore simple failures for v1 if interrupted with rem null
+            if rc != -4 {
+                return "time: sleep failed"
+            }
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        // Sleep(ms); round up
+        var ms: u64 = cast[u64](d / Millisecond)
+        if d % Millisecond != 0 {
+            ms = ms + 1
+        }
+        if ms == 0 {
+            ms = 1
+        }
+        if ms > 0xFFFFFFFF {
+            ms = 0xFFFFFFFF
+        }
+        var f: FnSleep = cast[FnSleep](g.sleep)
+        f(cast[u32](ms))
+        return 0
+    }
+    return "time: unknown os"
+}
+
+// Now returns Unix wall time in nanoseconds since epoch.
+fn Now() -> (i64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if runtime.IsLinux() {
+        // timespec
+        var ts: [16]u8
+        var rc: i64 = cast[i64](__syscall(SYS_CLOCK_GETTIME, CLOCK_REALTIME, cast[u64](&ts[0])))
+        if rc != 0 {
+            return 0, "time: clock failed"
+        }
+        var sec: i64 = cast[i64](__load64(cast[*void](&ts[0])))
+        var nsec: i64 = cast[i64](__load64(cast[*void](&ts[0] + 8)))
+        return Unix(sec, nsec), 0
+    }
+    if runtime.IsWindows() {
+        // FILETIME 8 bytes
+        var ft: [8]u8
+        var f: FnGetSystemTimeAsFileTime = cast[FnGetSystemTimeAsFileTime](g.get_filetime)
+        f(cast[PVOID](&ft[0]))
+        var ticks: u64 = __load64(cast[*void](&ft[0]))
+        if ticks < FILETIME_UNIX_DELTA {
+            return 0, "time: clock failed"
+        }
+        // 100ns units → ns
+        var unix100: u64 = ticks - FILETIME_UNIX_DELTA
+        return cast[i64](unix100 * 100), 0
+    }
+    return 0, "time: unknown os"
+}
+
+// Mono returns a monotonic clock reading in nanoseconds (for intervals).
+fn Mono() -> (i64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if runtime.IsLinux() {
+        var ts: [16]u8
+        var rc: i64 = cast[i64](__syscall(SYS_CLOCK_GETTIME, CLOCK_MONOTONIC, cast[u64](&ts[0])))
+        if rc != 0 {
+            return 0, "time: clock failed"
+        }
+        var sec: i64 = cast[i64](__load64(cast[*void](&ts[0])))
+        var nsec: i64 = cast[i64](__load64(cast[*void](&ts[0] + 8)))
+        return Unix(sec, nsec), 0
+    }
+    if runtime.IsWindows() {
+        if g.qpc == null || g.qpf_val == 0 {
+            // fallback: wall time
+            return Now()
+        }
+        var counter: i64 = 0
+        var f: FnQueryPerformanceCounter = cast[FnQueryPerformanceCounter](g.qpc)
+        if f(&counter) == 0 {
+            return 0, "time: clock failed"
+        }
+        // ns = counter * 1e9 / freq
+        var ns: i64 = (counter * Second) / g.qpf_val
+        return ns, 0
+    }
+    return 0, "time: unknown os"
+}
+
+// Since returns Mono() - start_ns (0 on Mono error).
+fn Since(start_ns: i64) -> Duration {
+    var now: i64
+    var err: *u8
+    now, err = Mono()
+    if err != 0 {
+        return 0
+    }
+    return now - start_ns
+}

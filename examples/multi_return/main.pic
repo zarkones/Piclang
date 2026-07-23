@@ -1,0 +1,88 @@
+// multi_return - multi-value returns, :=, blank _, *u8 errors (null = ok)
+//
+//   picc examples/multi_return/main.pic -o multi.bin -rand-sections=false
+//   ./harness/run_shellcode multi.bin   # returns 0
+//
+// Convention: fallible APIs return (value, *u8) where err == 0 means success.
+// Multi-return packs up to 4 ABI cells into RAX, RDX, R8, R9.
+package main
+
+// divmod returns quotient and remainder.
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+    return a / b, a % b
+}
+
+// lookup simulates a fallible lookup: (value, err).
+// err is a C string pointer; 0 means ok.
+fn lookup(key: u64) -> (u64, *u8) {
+    if key == 0 {
+        return 0, "empty key"
+    }
+    if key > 100 {
+        return 0, "out of range"
+    }
+    return key * 2, 0
+}
+
+// triple for blank-identifier demos.
+fn triple() -> (u64, u64, u64) {
+    return 1, 2, 3
+}
+
+// with_defer ensures multi-return survives defer LIFO.
+var g_bump: u64
+
+fn bump() {
+    g_bump = g_bump + 1
+}
+
+fn pair_defer() -> (u64, u64) {
+    defer bump()
+    return 10, 20
+}
+
+fn main() -> u64 {
+    // multi-assign into declared locals
+    var q: i64
+    var r: i64
+    q, r = divmod(17, 5)
+    if q != 3 {
+        return 1
+    }
+    if r != 2 {
+        return 2
+    }
+
+    // short declaration :=
+    val, err := lookup(21)
+    if err != 0 {
+        return 3
+    }
+    if val != 42 {
+        return 4
+    }
+
+    // error path: non-null *u8
+    _, err2 := lookup(0)
+    if err2 == 0 {
+        return 5
+    }
+
+    // blank identifier discards middle result
+    a, _, c := triple()
+    if a + c != 4 {
+        return 6
+    }
+
+    // defer runs after results are in regs; values must still be correct
+    g_bump = 0
+    x, y := pair_defer()
+    if x != 10 || y != 20 {
+        return 7
+    }
+    if g_bump != 1 {
+        return 8
+    }
+
+    return 0
+}

@@ -1,0 +1,313 @@
+// Package strings - OS-agnostic NUL-terminated string helpers.
+// Allocating APIs use runtime.Alloc/Free (call runtime.Init first).
+// Fallible APIs return (value, *u8) where err == 0 means success.
+// No slices; all strings are *u8 C strings.
+package strings
+
+import "std/runtime"
+import "std/mem"
+
+// Len returns the length of s excluding the terminating NUL.
+fn Len(s: *u8) -> u64 {
+    if s == null {
+        return 0
+    }
+    return __strlen(s)
+}
+
+// Compare reports whether a and b contain the same bytes (including equal NULs).
+fn Compare(a: *u8, b: *u8) -> bool {
+    if a == b {
+        return true
+    }
+    if a == null {
+        return false
+    }
+    if b == null {
+        return false
+    }
+    var i: u64 = 0
+    while 1 {
+        var ca: u8 = *(a + i)
+        var cb: u8 = *(b + i)
+        if ca != cb {
+            return false
+        }
+        if ca == 0 {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// HasPrefix reports whether s begins with prefix.
+fn HasPrefix(s: *u8, prefix: *u8) -> bool {
+    if prefix == null {
+        return true
+    }
+    if s == null {
+        return *prefix == 0
+    }
+    var i: u64 = 0
+    while 1 {
+        var cp: u8 = *(prefix + i)
+        if cp == 0 {
+            return true
+        }
+        var cs: u8 = *(s + i)
+        if cs != cp {
+            return false
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// HasSuffix reports whether s ends with suffix.
+fn HasSuffix(s: *u8, suffix: *u8) -> bool {
+    if suffix == null {
+        return true
+    }
+    var n: u64 = Len(s)
+    var m: u64 = Len(suffix)
+    if m > n {
+        return false
+    }
+    var i: u64 = 0
+    while i < m {
+        if *(s + (n - m) + i) != *(suffix + i) {
+            return false
+        }
+        i = i + 1
+    }
+    return true
+}
+
+// Contains reports whether sub appears in s.
+fn Contains(s: *u8, sub: *u8) -> bool {
+    if sub == null {
+        return true
+    }
+    if *sub == 0 {
+        return true
+    }
+    if s == null {
+        return false
+    }
+    var n: u64 = Len(s)
+    var m: u64 = Len(sub)
+    if m > n {
+        return false
+    }
+    var i: u64 = 0
+    while i + m <= n {
+        var j: u64 = 0
+        var mismatch: u64 = 0
+        while j < m {
+            if *(s + i + j) != *(sub + j) {
+                mismatch = 1
+            }
+            j = j + 1
+        }
+        if mismatch == 0 {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+// Append returns a new heap string a+b. Caller must Free the result.
+// On success: (s, 0). On failure: (null, error).
+fn Append(a: *u8, b: *u8) -> (*u8, *u8) {
+    var na: u64 = Len(a)
+    var nb: u64 = Len(b)
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(na + nb + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    if na > 0 {
+        mem.Copy(cast[*void](out), cast[*void](a), na)
+    }
+    if nb > 0 {
+        mem.Copy(cast[*void](out + na), cast[*void](b), nb)
+    }
+    *(out + na + nb) = 0
+    return out, 0
+}
+
+// Replace returns a new string with the first occurrence of old replaced by new.
+// On success: (s, 0). On failure: (null, error).
+fn Replace(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
+    var n: u64 = Len(s)
+    var m: u64 = Len(old)
+    var k: u64 = Len(new_s)
+    if m == 0 {
+        return Append(s, cast[*u8](null))
+    }
+    if m > n {
+        return Append(s, cast[*u8](null))
+    }
+    // find first match
+    var idx: u64 = n + 1
+    var i: u64 = 0
+    var done: u64 = 0
+    while done == 0 {
+        if i + m > n {
+            done = 1
+        } else {
+            var j: u64 = 0
+            var mismatch: u64 = 0
+            while j < m {
+                if *(s + i + j) != *(old + j) {
+                    mismatch = 1
+                }
+                j = j + 1
+            }
+            if mismatch == 0 {
+                idx = i
+                done = 1
+            } else {
+                i = i + 1
+            }
+        }
+    }
+    if idx > n {
+        return Append(s, cast[*u8](null))
+    }
+    var out_len: u64 = n - m + k
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(out_len + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    if idx > 0 {
+        mem.Copy(cast[*void](out), cast[*void](s), idx)
+    }
+    if k > 0 {
+        mem.Copy(cast[*void](out + idx), cast[*void](new_s), k)
+    }
+    var rest: u64 = n - idx - m
+    if rest > 0 {
+        mem.Copy(cast[*void](out + idx + k), cast[*void](s + idx + m), rest)
+    }
+    *(out + out_len) = 0
+    return out, 0
+}
+
+// Count returns how many times old appears in s (non-overlapping).
+fn Count(s: *u8, old: *u8) -> u64 {
+    if s == null {
+        return 0
+    }
+    var m: u64 = Len(old)
+    if m == 0 {
+        return 0
+    }
+    var n: u64 = Len(s)
+    var count: u64 = 0
+    var i: u64 = 0
+    while i + m <= n {
+        var j: u64 = 0
+        var mismatch: u64 = 0
+        while j < m {
+            if *(s + i + j) != *(old + j) {
+                mismatch = 1
+            }
+            j = j + 1
+        }
+        if mismatch == 0 {
+            count = count + 1
+            i = i + m
+        } else {
+            i = i + 1
+        }
+    }
+    return count
+}
+
+// ReplaceAll returns a new string with every occurrence of old replaced by new.
+// On success: (s, 0). On failure: (null, error).
+fn ReplaceAll(s: *u8, old: *u8, new_s: *u8) -> (*u8, *u8) {
+    if s == null {
+        return null, "strings: null input"
+    }
+    var m: u64 = Len(old)
+    if m == 0 {
+        return Append(s, cast[*u8](null))
+    }
+    var k: u64 = Len(new_s)
+    var n: u64 = Len(s)
+    // Count occurrences (no break - nested break is unreliable in current codegen)
+    var count: u64 = 0
+    var i: u64 = 0
+    while i + m <= n {
+        var j: u64 = 0
+        var mismatch: u64 = 0
+        while j < m {
+            if *(s + i + j) != *(old + j) {
+                mismatch = 1
+            }
+            j = j + 1
+        }
+        if mismatch == 0 {
+            count = count + 1
+            i = i + m
+        } else {
+            i = i + 1
+        }
+    }
+    if count == 0 {
+        return Append(s, cast[*u8](null))
+    }
+    var out_len: u64 = n - count * m + count * k
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(out_len + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var si: u64 = 0
+    var di: u64 = 0
+    while si < n {
+        var match: u64 = 0
+        if si + m <= n {
+            var j2: u64 = 0
+            var mm: u64 = 0
+            while j2 < m {
+                if *(s + si + j2) != *(old + j2) {
+                    mm = 1
+                }
+                j2 = j2 + 1
+            }
+            if mm == 0 {
+                match = 1
+            }
+        }
+        if match != 0 {
+            if k > 0 {
+                mem.Copy(cast[*void](out + di), cast[*void](new_s), k)
+            }
+            di = di + k
+            si = si + m
+        } else {
+            *(out + di) = *(s + si)
+            di = di + 1
+            si = si + 1
+        }
+    }
+    *(out + di) = 0
+    return out, 0
+}
+
+// Free releases a string returned by Append/Replace/ReplaceAll.
+fn Free(s: *u8) {
+    runtime.Free(cast[*void](s))
+}

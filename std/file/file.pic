@@ -1,0 +1,454 @@
+// Package file - dual-OS file I/O for PIC implants.
+//
+// Requires runtime.Init(stack_hint) first. APIs resolve libc (Linux) or
+// kernel32 (Windows) on first use.
+//
+// Errors: fallible APIs return *u8 where 0 means success.
+// ReadAll returns ([]u8, *u8); the slice owns its buffer - free(data) when done.
+//
+// Paths are byte strings (*u8): POSIX paths on Linux, ANSI (CreateFileA) on Windows.
+package file
+
+import "std/runtime"
+import lresolve "std/linux/resolve"
+import wresolve "std/windows/resolve"
+
+type PVOID = *void
+type Handle = u64
+
+// INVALID is the failed-open handle (Linux -1 / Windows INVALID_HANDLE_VALUE).
+const INVALID: u64 = 0xFFFFFFFFFFFFFFFF
+
+// Abstract open modes (mapped to OS flags inside Open).
+const O_READ: u64 = 1
+const O_WRITE: u64 = 2
+const O_READWRITE: u64 = 3
+
+// Soft cap for ReadAll (64 MiB).
+const MAX_READ: u64 = 67108864
+
+// Linux open flags / seek
+const L_O_RDONLY: u64 = 0
+const L_O_WRONLY: u64 = 1
+const L_O_RDWR: u64 = 2
+const L_O_CREAT: u64 = 64
+const L_O_TRUNC: u64 = 512
+const L_O_APPEND: u64 = 1024
+const L_MODE_0644: u64 = 420
+const L_SEEK_SET: u64 = 0
+const L_SEEK_END: u64 = 2
+
+// Windows CreateFile / access
+const W_GENERIC_READ: u64 = 0x80000000
+const W_GENERIC_WRITE: u64 = 0x40000000
+const W_FILE_SHARE_READ: u64 = 1
+const W_FILE_SHARE_WRITE: u64 = 2
+const W_CREATE_ALWAYS: u64 = 2
+const W_OPEN_EXISTING: u64 = 3
+const W_OPEN_ALWAYS: u64 = 4
+const W_FILE_ATTRIBUTE_NORMAL: u64 = 0x80
+const W_INVALID_FILE_SIZE: u64 = 0xFFFFFFFF
+
+// Typed Windows entry points (MS x64).
+type FnCreateFileA = fn(*u8, u32, u32, PVOID, u32, u32, Handle) -> Handle
+type FnReadFile = fn(Handle, PVOID, u32, *u32, PVOID) -> u32
+type FnWriteFile = fn(Handle, PVOID, u32, *u32, PVOID) -> u32
+type FnCloseHandle = fn(Handle) -> u32
+type FnGetFileSize = fn(Handle, *u32) -> u32
+type FnDeleteFileA = fn(*u8) -> u32
+
+struct State {
+    ready: u64
+    // Linux: libc open/read/write/close/lseek/unlink
+    // Windows: kernel32 CreateFileA/ReadFile/WriteFile/CloseHandle/GetFileSize/DeleteFileA
+    open: PVOID
+    read: PVOID
+    write: PVOID
+    close: PVOID
+    seek: PVOID
+    remove: PVOID
+}
+
+var g: State
+
+fn ensure() -> *u8 {
+    if g.ready != 0 {
+        return 0
+    }
+    if !runtime.Ready() {
+        return "file: runtime not ready"
+    }
+    if runtime.IsLinux() {
+        return ensure_linux()
+    }
+    if runtime.IsWindows() {
+        return ensure_windows()
+    }
+    return "file: unknown os"
+}
+
+fn ensure_linux() -> *u8 {
+    var hint: PVOID = runtime.StackHint()
+    var H_LIBC6: u32 = __hash("libc.so.6")
+    var H_LIBC: u32 = __hash("libc.so")
+    var libc: PVOID = lresolve.Module(H_LIBC6, hint)
+    if libc == null {
+        libc = lresolve.Module(H_LIBC, hint)
+    }
+    if libc == null {
+        return "file: resolve failed"
+    }
+    g.open = lresolve.Symbol(libc, __hash("open"))
+    g.read = lresolve.Symbol(libc, __hash("read"))
+    g.write = lresolve.Symbol(libc, __hash("write"))
+    g.close = lresolve.Symbol(libc, __hash("close"))
+    g.seek = lresolve.Symbol(libc, __hash("lseek"))
+    g.remove = lresolve.Symbol(libc, __hash("unlink"))
+    if g.open == null {
+        return "file: resolve failed"
+    }
+    if g.read == null {
+        return "file: resolve failed"
+    }
+    if g.write == null {
+        return "file: resolve failed"
+    }
+    if g.close == null {
+        return "file: resolve failed"
+    }
+    if g.seek == null {
+        return "file: resolve failed"
+    }
+    if g.remove == null {
+        return "file: resolve failed"
+    }
+    g.ready = 1
+    return 0
+}
+
+fn ensure_windows() -> *u8 {
+    var H_K32: u32 = __hash("KERNEL32.DLL")
+    var k32: PVOID = wresolve.Module(H_K32)
+    if k32 == null {
+        return "file: resolve failed"
+    }
+    g.open = wresolve.Symbol(k32, __hash("CreateFileA"))
+    g.read = wresolve.Symbol(k32, __hash("ReadFile"))
+    g.write = wresolve.Symbol(k32, __hash("WriteFile"))
+    g.close = wresolve.Symbol(k32, __hash("CloseHandle"))
+    g.seek = wresolve.Symbol(k32, __hash("GetFileSize"))
+    g.remove = wresolve.Symbol(k32, __hash("DeleteFileA"))
+    if g.open == null {
+        return "file: resolve failed"
+    }
+    if g.read == null {
+        return "file: resolve failed"
+    }
+    if g.write == null {
+        return "file: resolve failed"
+    }
+    if g.close == null {
+        return "file: resolve failed"
+    }
+    if g.seek == null {
+        return "file: resolve failed"
+    }
+    if g.remove == null {
+        return "file: resolve failed"
+    }
+    g.ready = 1
+    return 0
+}
+
+// Open opens path with an abstract mode (O_READ, O_WRITE, O_READWRITE).
+fn Open(path: *u8, mode: u64) -> (Handle, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return INVALID, err
+    }
+    if path == null {
+        return INVALID, "file: null path"
+    }
+    if runtime.IsLinux() {
+        return open_linux(path, mode)
+    }
+    if runtime.IsWindows() {
+        return open_windows(path, mode)
+    }
+    return INVALID, "file: unknown os"
+}
+
+fn open_linux(path: *u8, mode: u64) -> (Handle, *u8) {
+    var flags: u64 = L_O_RDONLY
+    var perm: u64 = 0
+    if mode == O_WRITE {
+        flags = L_O_WRONLY + L_O_CREAT + L_O_TRUNC
+        perm = L_MODE_0644
+    } else {
+        if mode == O_READWRITE {
+            flags = L_O_RDWR
+        }
+    }
+    var fd: i64 = cast[i64](__sysv_call(g.open, cast[u64](path), flags, perm))
+    if fd < 0 {
+        return INVALID, "file: open failed"
+    }
+    return cast[Handle](fd), 0
+}
+
+fn open_windows(path: *u8, mode: u64) -> (Handle, *u8) {
+    var access: u32 = cast[u32](W_GENERIC_READ)
+    var share: u32 = cast[u32](W_FILE_SHARE_READ)
+    var disp: u32 = cast[u32](W_OPEN_EXISTING)
+    if mode == O_WRITE {
+        access = cast[u32](W_GENERIC_WRITE)
+        share = 0
+        disp = cast[u32](W_CREATE_ALWAYS)
+    } else {
+        if mode == O_READWRITE {
+            access = cast[u32](W_GENERIC_READ + W_GENERIC_WRITE)
+            share = cast[u32](W_FILE_SHARE_READ + W_FILE_SHARE_WRITE)
+            disp = cast[u32](W_OPEN_EXISTING)
+        }
+    }
+    var f: FnCreateFileA = cast[FnCreateFileA](g.open)
+    var h: Handle = f(path, access, share, null, disp, cast[u32](W_FILE_ATTRIBUTE_NORMAL), 0)
+    if h == INVALID {
+        return INVALID, "file: open failed"
+    }
+    return h, 0
+}
+
+// Close closes a handle from Open. INVALID / null-like is ignored.
+fn Close(h: Handle) -> *u8 {
+    if h == INVALID {
+        return 0
+    }
+    var err: *u8 = ensure()
+    if err != 0 {
+        return err
+    }
+    if runtime.IsLinux() {
+        var rc: i64 = cast[i64](__sysv_call(g.close, h))
+        if rc < 0 {
+            return "file: close failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var f: FnCloseHandle = cast[FnCloseHandle](g.close)
+        if f(h) == 0 {
+            return "file: close failed"
+        }
+        return 0
+    }
+    return "file: unknown os"
+}
+
+// Read reads up to n bytes into buf. Returns (bytes_read, err).
+fn Read(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if h == INVALID {
+        return 0, "file: bad handle"
+    }
+    if n == 0 {
+        return 0, 0
+    }
+    if runtime.IsLinux() {
+        var rc: i64 = cast[i64](__sysv_call(g.read, h, cast[u64](buf), n))
+        if rc < 0 {
+            return 0, "file: read failed"
+        }
+        return cast[u64](rc), 0
+    }
+    if runtime.IsWindows() {
+        var got: u32 = 0
+        var f: FnReadFile = cast[FnReadFile](g.read)
+        var ok: u32 = f(h, cast[PVOID](buf), cast[u32](n), &got, null)
+        if ok == 0 {
+            return 0, "file: read failed"
+        }
+        return cast[u64](got), 0
+    }
+    return 0, "file: unknown os"
+}
+
+// Write writes n bytes from buf. Returns (bytes_written, err).
+fn Write(h: Handle, buf: *u8, n: u64) -> (u64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if h == INVALID {
+        return 0, "file: bad handle"
+    }
+    if n == 0 {
+        return 0, 0
+    }
+    if runtime.IsLinux() {
+        var rc: i64 = cast[i64](__sysv_call(g.write, h, cast[u64](buf), n))
+        if rc < 0 {
+            return 0, "file: write failed"
+        }
+        return cast[u64](rc), 0
+    }
+    if runtime.IsWindows() {
+        var got: u32 = 0
+        var f: FnWriteFile = cast[FnWriteFile](g.write)
+        var ok: u32 = f(h, cast[PVOID](buf), cast[u32](n), &got, null)
+        if ok == 0 {
+            return 0, "file: write failed"
+        }
+        return cast[u64](got), 0
+    }
+    return 0, "file: unknown os"
+}
+
+// Size returns the file size in bytes for an open handle.
+fn Size(h: Handle) -> (u64, *u8) {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return 0, err
+    }
+    if h == INVALID {
+        return 0, "file: bad handle"
+    }
+    if runtime.IsLinux() {
+        var end: i64 = cast[i64](__sysv_call(g.seek, h, 0, L_SEEK_END))
+        if end < 0 {
+            return 0, "file: size failed"
+        }
+        var back: i64 = cast[i64](__sysv_call(g.seek, h, 0, L_SEEK_SET))
+        if back < 0 {
+            return 0, "file: size failed"
+        }
+        return cast[u64](end), 0
+    }
+    if runtime.IsWindows() {
+        var f: FnGetFileSize = cast[FnGetFileSize](g.seek)
+        var sz: u32 = f(h, null)
+        if cast[u64](sz) == W_INVALID_FILE_SIZE {
+            return 0, "file: size failed"
+        }
+        return cast[u64](sz), 0
+    }
+    return 0, "file: unknown os"
+}
+
+// Remove deletes the file at path.
+fn Remove(path: *u8) -> *u8 {
+    var err: *u8 = ensure()
+    if err != 0 {
+        return err
+    }
+    if path == null {
+        return "file: null path"
+    }
+    if runtime.IsLinux() {
+        var rc: i64 = cast[i64](__sysv_call(g.remove, cast[u64](path)))
+        if rc < 0 {
+            return "file: remove failed"
+        }
+        return 0
+    }
+    if runtime.IsWindows() {
+        var f: FnDeleteFileA = cast[FnDeleteFileA](g.remove)
+        if f(path) == 0 {
+            return "file: remove failed"
+        }
+        return 0
+    }
+    return "file: unknown os"
+}
+
+// WriteAll creates/truncates path and writes n bytes from data.
+fn WriteAll(path: *u8, data: *u8, n: u64) -> *u8 {
+    var h: Handle
+    var err: *u8
+    h, err = Open(path, O_WRITE)
+    if err != 0 {
+        return err
+    }
+    var off: u64 = 0
+    while off < n {
+        var nw: u64
+        var e2: *u8
+        nw, e2 = Write(h, data + off, n - off)
+        if e2 != 0 {
+            Close(h)
+            return e2
+        }
+        if nw == 0 {
+            Close(h)
+            return "file: write failed"
+        }
+        off = off + nw
+    }
+    return Close(h)
+}
+
+// WriteString writes a NUL-terminated C string (excluding the NUL).
+fn WriteString(path: *u8, s: *u8) -> *u8 {
+    var n: u64 = 0
+    if s != null {
+        n = __strlen(s)
+    }
+    return WriteAll(path, s, n)
+}
+
+// ReadAll reads the entire file into an owning []u8. Caller must free(data).
+fn ReadAll(path: *u8) -> ([]u8, *u8) {
+    var empty: []u8 = make([]u8, 0, 0)
+    var h: Handle
+    var err: *u8
+    h, err = Open(path, O_READ)
+    if err != 0 {
+        return empty, err
+    }
+    var n: u64
+    n, err = Size(h)
+    if err != 0 {
+        Close(h)
+        return empty, err
+    }
+    if n > MAX_READ {
+        Close(h)
+        return empty, "file: too large"
+    }
+    if n == 0 {
+        Close(h)
+        return empty, 0
+    }
+    var s: []u8 = make([]u8, n, n)
+    if len(s) != n {
+        Close(h)
+        free(s)
+        return empty, "file: alloc failed"
+    }
+    var off: u64 = 0
+    while off < n {
+        var nr: u64
+        var e2: *u8
+        nr, e2 = Read(h, &s[0] + off, n - off)
+        if e2 != 0 {
+            Close(h)
+            free(s)
+            return empty, e2
+        }
+        if nr == 0 {
+            Close(h)
+            free(s)
+            return empty, "file: read failed"
+        }
+        off = off + nr
+    }
+    err = Close(h)
+    if err != 0 {
+        free(s)
+        return empty, err
+    }
+    return s, 0
+}

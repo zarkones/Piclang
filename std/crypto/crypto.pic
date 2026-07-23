@@ -1,0 +1,223 @@
+// Package crypto - light PIC-friendly primitives (no OS).
+// XOR, RC4, hex, constant-time Equal, djb2 HashA (__hash).
+package crypto
+
+import "std/runtime"
+import "std/mem"
+
+// HashA is djb2 uppercase (same as __hash / Stardust-style).
+fn HashA(s: *u8) -> u32 {
+    return __hash(s)
+}
+
+// Equal reports whether a[0:n] equals b[0:n] (best-effort constant-time).
+fn Equal(a: *u8, b: *u8, n: u64) -> bool {
+    if a == null {
+        return b == null || n == 0
+    }
+    if b == null {
+        return n == 0
+    }
+    var diff: u8 = 0
+    var i: u64 = 0
+    while i < n {
+        diff = diff | (*(a + i) ^ *(b + i))
+        i = i + 1
+    }
+    return diff == 0
+}
+
+// XORBytes XORs data[0:n] in place with repeating key.
+fn XORBytes(data: *u8, n: u64, key: *u8, keylen: u64) {
+    if data == null {
+        return
+    }
+    if key == null {
+        return
+    }
+    if keylen == 0 {
+        return
+    }
+    var i: u64 = 0
+    while i < n {
+        *(data + i) = *(data + i) ^ *(key + (i % keylen))
+        i = i + 1
+    }
+}
+
+// XOR writes src[0:n] XOR key into dst (dst may equal src).
+fn XOR(dst: *u8, src: *u8, n: u64, key: *u8, keylen: u64) {
+    if dst == null {
+        return
+    }
+    if src == null {
+        return
+    }
+    if key == null || keylen == 0 {
+        if dst != src {
+            mem.Copy(cast[*void](dst), cast[*void](src), n)
+        }
+        return
+    }
+    var i: u64 = 0
+    while i < n {
+        *(dst + i) = *(src + i) ^ *(key + (i % keylen))
+        i = i + 1
+    }
+}
+
+// RC4 state (256-byte S-box + i,j).
+struct RC4 {
+    S: [256]u8
+    i: u8
+    j: u8
+}
+
+// RC4Init initializes st with key (KSA).
+fn RC4Init(st: *RC4, key: *u8, keylen: u64) {
+    var i: u64 = 0
+    while i < 256 {
+        st.S[i] = cast[u8](i)
+        i = i + 1
+    }
+    st.i = 0
+    st.j = 0
+    if key == null || keylen == 0 {
+        return
+    }
+    var j: u64 = 0
+    i = 0
+    while i < 256 {
+        j = (j + cast[u64](st.S[i]) + cast[u64](*(key + (i % keylen)))) & 255
+        var t: u8 = st.S[i]
+        st.S[i] = st.S[j]
+        st.S[j] = t
+        i = i + 1
+    }
+}
+
+// RC4XOR encrypts/decrypts data in place (PRGA).
+fn RC4XOR(st: *RC4, data: *u8, n: u64) {
+    if data == null {
+        return
+    }
+    var i: u64 = cast[u64](st.i)
+    var j: u64 = cast[u64](st.j)
+    var k: u64 = 0
+    while k < n {
+        i = (i + 1) & 255
+        j = (j + cast[u64](st.S[i])) & 255
+        var t: u8 = st.S[i]
+        st.S[i] = st.S[j]
+        st.S[j] = t
+        var si: u64 = cast[u64](st.S[i])
+        var sj: u64 = cast[u64](st.S[j])
+        var idx: u64 = (si + sj) & 255
+        *(data + k) = *(data + k) ^ st.S[idx]
+        k = k + 1
+    }
+    st.i = cast[u8](i)
+    st.j = cast[u8](j)
+}
+
+fn hex_digit(c: u8) -> u8 {
+    if c < 10 {
+        return 48 + c // '0'
+    }
+    return 97 + (c - 10) // 'a'
+}
+
+fn from_hex_digit(c: u8) -> i64 {
+    if c >= 48 {
+        if c <= 57 {
+            return cast[i64](c - 48)
+        }
+    }
+    if c >= 97 {
+        if c <= 102 {
+            return cast[i64](c - 97 + 10)
+        }
+    }
+    if c >= 65 {
+        if c <= 70 {
+            return cast[i64](c - 65 + 10)
+        }
+    }
+    return -1
+}
+
+// HexEncode returns a new heap hex string (2*n chars + NUL). Caller Free.
+fn HexEncode(data: *u8, n: u64) -> (*u8, *u8) {
+    if data == null && n > 0 {
+        return null, "crypto: null data"
+    }
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(n * 2 + 1)
+    if err != 0 {
+        return null, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var i: u64 = 0
+    while i < n {
+        var b: u8 = *(data + i)
+        *(out + i * 2) = hex_digit(b >> 4)
+        *(out + i * 2 + 1) = hex_digit(b & 15)
+        i = i + 1
+    }
+    *(out + n * 2) = 0
+    return out, 0
+}
+
+// HexDecode decodes a hex C string into a new heap buffer. Caller Free.
+// Returns (ptr, len, err) - len via out_len pointer to keep ABI simple:
+// actually return (*u8, *u8) and encode length in first... use (ptr, err) + out param.
+// Multi-return: (*u8, u64, *u8) = 3 cells - OK.
+fn HexDecode(hex: *u8) -> (*u8, u64, *u8) {
+    if hex == null {
+        return null, 0, "crypto: null hex"
+    }
+    var n: u64 = __strlen(hex)
+    if (n & 1) != 0 {
+        return null, 0, "crypto: odd hex length"
+    }
+    var out_n: u64 = n / 2
+    if out_n == 0 {
+        var empty: *void
+        var err0: *u8
+        empty, err0 = runtime.Alloc(1)
+        if err0 != 0 {
+            return null, 0, err0
+        }
+        *cast[*u8](empty) = 0
+        return cast[*u8](empty), 0, 0
+    }
+    var raw: *void
+    var err: *u8
+    raw, err = runtime.Alloc(out_n)
+    if err != 0 {
+        return null, 0, err
+    }
+    var out: *u8 = cast[*u8](raw)
+    var i: u64 = 0
+    while i < out_n {
+        var hi: i64 = from_hex_digit(*(hex + i * 2))
+        var lo: i64 = from_hex_digit(*(hex + i * 2 + 1))
+        if hi < 0 {
+            runtime.Free(raw)
+            return null, 0, "crypto: bad hex"
+        }
+        if lo < 0 {
+            runtime.Free(raw)
+            return null, 0, "crypto: bad hex"
+        }
+        *(out + i) = cast[u8]((hi << 4) + lo)
+        i = i + 1
+    }
+    return out, out_n, 0
+}
+
+// Free is an alias for runtime.Free for buffers from HexEncode/HexDecode.
+fn Free(p: *u8) {
+    runtime.Free(cast[*void](p))
+}

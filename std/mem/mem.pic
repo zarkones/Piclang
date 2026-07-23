@@ -1,0 +1,14 @@
+// Package mem - freestanding memory helpers (no OS).
+package mem
+
+fn Copy(dst: *void, src: *void, n: u64) -> *void {
+    return __memcpy(dst, src, n)
+}
+
+fn Set(dst: *void, val: u64, n: u64) -> *void {
+    return __memset(dst, val, n)
+}
+
+fn Equal(a: *void, b: *void, n: u64) -> bool {
+    return __memcmp(a, b, n) == 0
+}

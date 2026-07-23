@@ -1,0 +1,479 @@
+// piclin.pic - Linux x86_64 position-independent implant (research PoC)
+//
+// Port of /home/user/Desktop/projects/piclin to Piclang.
+// Stardust-inspired: RIP base, page-aligned globals, runtime resolve.
+//
+// Flow (ELF analogue of PEB walk):
+//   1. Entry passes stack frame as stack_hint (return addr at [hint+8])
+//   2. Page-walk from loader retaddr → ELF header of main / ld.so
+//   3. PT_DYNAMIC / DT_DEBUG → r_debug → link_map list
+//   4. Match libc by djb2 hash of basename ("libc.so.6")
+//   5. Dynsym scan for open/write/close/exit by hash
+//   6. open("test.txt") / write("success") / close / exit
+//
+// Build:  picc examples/piclin/piclin.pic -o examples/piclin/piclin.bin -S
+// Run:    map RWX + call (harness), then cat test.txt → "success"
+//
+// Libc is invoked with __sysv_call (System V AMD64), not the default MS x64
+// convention used for Piclang-internal calls.
+
+type PVOID = *void
+type size_t = u64
+type uintptr = u64
+
+// ---- ELF / dynamic linker constants ----
+const ELFMAG = 0x464C457F       // \x7fELF little-endian u32
+const ELFCLASS64 = 2
+const ELFDATA2LSB = 1
+const ET_EXEC = 2
+const ET_DYN = 3
+const PT_LOAD = 1
+const PT_DYNAMIC = 2
+const DT_NULL = 0
+const DT_HASH = 4
+const DT_STRTAB = 5
+const DT_SYMTAB = 6
+const DT_DEBUG = 21
+const DT_GNU_HASH = 0x6FFFFEF5
+const STB_GLOBAL = 1
+const STB_WEAK = 2
+const STT_NOTYPE = 0
+const STT_OBJECT = 1
+const STT_FUNC = 2
+const SHN_UNDEF = 0
+
+// open flags
+const O_WRONLY = 1
+const O_CREAT = 64
+const O_TRUNC = 512
+const O_FLAGS = 577             // O_CREAT|O_WRONLY|O_TRUNC
+const MODE_0644 = 420           // 0644
+
+// Struct sizes (x86_64)
+const SIZE_EHDR = 64
+const SIZE_PHDR = 56
+const SIZE_DYN = 16
+const SIZE_SYM = 24
+
+// ---- Layout helpers (raw offsets; matches Linux ABI) ----
+// Elf64_Ehdr
+//   e_ident[16]@0  e_type@16  e_machine@18  e_version@20
+//   e_entry@24  e_phoff@32  e_shoff@40  e_flags@48
+//   e_ehsize@52  e_phentsize@54  e_phnum@56
+// Elf64_Phdr
+//   p_type@0  p_flags@4  p_offset@8  p_vaddr@16  p_paddr@24
+//   p_filesz@32  p_memsz@40  p_align@48
+// Elf64_Dyn: d_tag@0 (i64)  d_val/d_ptr@8
+// Elf64_Sym: st_name@0  st_info@4  st_other@5  st_shndx@6  st_value@8  st_size@16
+// r_debug: r_version@0  r_map@8
+// link_map: l_addr@0  l_name@8  l_ld@16  l_next@24  l_prev@32
+
+// Global implant instance (page-aligned .global section)
+struct Instance {
+    base_buffer: PVOID
+    base_length: u64
+    libc: PVOID
+    open: PVOID
+    write: PVOID
+    close: PVOID
+    exit_fn: PVOID
+}
+
+var g_inst: Instance
+
+// ---- memory / string helpers ----
+
+fn path_basename(path: *u8) -> *u8 {
+    var base: *u8 = path
+    if path == null {
+        return path
+    }
+    var p: *u8 = path
+    while *p != 0 {
+        if *p == 0x2F {
+            base = p + 1
+        }
+        p = p + 1
+    }
+    return base
+}
+
+fn hash_string(s: *u8) -> u32 {
+    return __hash(s)
+}
+
+// ---- ELF helpers ----
+
+fn elf_valid(base: PVOID) -> u64 {
+    if base == null {
+        return 0
+    }
+    var mag: u32 = __load32(base)
+    if mag != ELFMAG {
+        return 0
+    }
+    var cls: u8 = __load8(cast[*void](cast[u64](base) + 4))
+    var data: u8 = __load8(cast[*void](cast[u64](base) + 5))
+    if cls != ELFCLASS64 {
+        return 0
+    }
+    if data != ELFDATA2LSB {
+        return 0
+    }
+    var etype: u16 = __load16(cast[*void](cast[u64](base) + 16))
+    if etype != ET_EXEC {
+        if etype != ET_DYN {
+            return 0
+        }
+    }
+    return 1
+}
+
+fn find_elf_header(hint: PVOID, max_pages: u64) -> PVOID {
+    var addr: u64 = cast[u64](hint) & 0xFFFFFFFFFFFFF000
+    var i: u64 = 0
+    while i < max_pages {
+        if elf_valid(cast[PVOID](addr)) != 0 {
+            return cast[PVOID](addr)
+        }
+        if addr < 0x1000 {
+            return null
+        }
+        addr = addr - 0x1000
+        i = i + 1
+    }
+    return null
+}
+
+fn elf_load_bias(base: PVOID) -> u64 {
+    var phoff: u64 = __load64(cast[*void](cast[u64](base) + 32))
+    var phnum: u16 = __load16(cast[*void](cast[u64](base) + 56))
+    var ph: u64 = cast[u64](base) + phoff
+    var i: u16 = 0
+    while i < phnum {
+        var p_type: u32 = __load32(cast[*void](ph))
+        if p_type == PT_LOAD {
+            var p_vaddr: u64 = __load64(cast[*void](ph + 16))
+            return cast[u64](base) - p_vaddr
+        }
+        ph = ph + SIZE_PHDR
+        i = i + 1
+    }
+    return cast[u64](base)
+}
+
+fn elf_dynamic(base: PVOID) -> PVOID {
+    var phoff: u64 = __load64(cast[*void](cast[u64](base) + 32))
+    var phnum: u16 = __load16(cast[*void](cast[u64](base) + 56))
+    var bias: u64 = elf_load_bias(base)
+    var ph: u64 = cast[u64](base) + phoff
+    var i: u16 = 0
+    while i < phnum {
+        var p_type: u32 = __load32(cast[*void](ph))
+        if p_type == PT_DYNAMIC {
+            var p_vaddr: u64 = __load64(cast[*void](ph + 16))
+            return cast[PVOID](bias + p_vaddr)
+        }
+        ph = ph + SIZE_PHDR
+        i = i + 1
+    }
+    return null
+}
+
+fn elf_r_debug(base: PVOID) -> PVOID {
+    var dyn: PVOID = elf_dynamic(base)
+    if dyn == null {
+        return null
+    }
+    var d: u64 = cast[u64](dyn)
+    while 1 {
+        var tag: i64 = cast[i64](__load64(cast[*void](d)))
+        if tag == DT_NULL {
+            return null
+        }
+        if tag == DT_DEBUG {
+            var ptr: u64 = __load64(cast[*void](d + 8))
+            if ptr == 0 {
+                return null
+            }
+            // r_map at offset 8 of r_debug
+            var r_map: u64 = __load64(cast[*void](ptr + 8))
+            if r_map == 0 {
+                return null
+            }
+            return cast[PVOID](ptr)
+        }
+        d = d + SIZE_DYN
+    }
+    return null
+}
+
+// Discover r_debug: page-walk from loader return address, then auxv-ish scan.
+fn find_r_debug(stack_hint: PVOID) -> PVOID {
+    if stack_hint != null {
+        // [rbp+8] = return address into the loader that called the implant
+        var retaddr: PVOID = cast[PVOID](__load64(cast[*void](cast[u64](stack_hint) + 8)))
+        var elf: PVOID = find_elf_header(retaddr, 0x10000)
+        if elf != null {
+            var dbg: PVOID = elf_r_debug(elf)
+            if dbg != null {
+                return dbg
+            }
+        }
+    }
+
+    if stack_hint != null {
+        var sp: *u64 = cast[*u64](stack_hint)
+        var i: u64 = 0
+        while i < 0x400 {
+            // AT_PHDR = 3
+            if sp[i] == 3 {
+                if sp[i + 1] > 0x1000 {
+                    var phdr: PVOID = cast[PVOID](sp[i + 1])
+                    var base: PVOID = find_elf_header(phdr, 0x100)
+                    if base != null {
+                        var dbg2: PVOID = elf_r_debug(base)
+                        if dbg2 != null {
+                            return dbg2
+                        }
+                    }
+                }
+            }
+            i = i + 1
+        }
+    }
+    return null
+}
+
+fn link_map_base(lm: PVOID) -> PVOID {
+    if lm == null {
+        return null
+    }
+    var l_ld: PVOID = cast[PVOID](__load64(cast[*void](cast[u64](lm) + 16)))
+    if l_ld != null {
+        var elf: PVOID = find_elf_header(l_ld, 0x1000)
+        if elf != null {
+            return elf
+        }
+    }
+    var l_addr: u64 = __load64(lm)
+    if l_addr != 0 {
+        if elf_valid(cast[PVOID](l_addr)) != 0 {
+            return cast[PVOID](l_addr)
+        }
+    }
+    return cast[PVOID](l_addr)
+}
+
+// Find loaded module by djb2 hash of basename (or full path).
+fn resolve_module(name_hash: u32, stack_hint: PVOID) -> PVOID {
+    var dbg: PVOID = find_r_debug(stack_hint)
+    if dbg == null {
+        return null
+    }
+    var lm: PVOID = cast[PVOID](__load64(cast[*void](cast[u64](dbg) + 8)))
+    while lm != null {
+        var l_name: *u8 = cast[*u8](__load64(cast[*void](cast[u64](lm) + 8)))
+        if l_name != null {
+            if *l_name != 0 {
+                var base_name: *u8 = path_basename(l_name)
+                if hash_string(base_name) == name_hash {
+                    return link_map_base(lm)
+                }
+                if hash_string(l_name) == name_hash {
+                    return link_map_base(lm)
+                }
+            }
+        }
+        lm = cast[PVOID](__load64(cast[*void](cast[u64](lm) + 24)))
+    }
+    return null
+}
+
+// Resolve export from module by djb2 hash of symbol name (linear dynsym scan).
+fn resolve_symbol(module_base: PVOID, func_hash: u32) -> PVOID {
+    if module_base == null {
+        return null
+    }
+    if elf_valid(module_base) == 0 {
+        return null
+    }
+
+    var bias: u64 = elf_load_bias(module_base)
+    var dyn: PVOID = elf_dynamic(module_base)
+    if dyn == null {
+        return null
+    }
+
+    var symtab: u64 = 0
+    var strtab: u64 = 0
+    var nchain: u32 = 0
+
+    var d: u64 = cast[u64](dyn)
+    while 1 {
+        var tag: i64 = cast[i64](__load64(cast[*void](d)))
+        if tag == DT_NULL {
+            break
+        }
+        var ptr: u64 = __load64(cast[*void](d + 8))
+        if tag == DT_SYMTAB {
+            symtab = ptr
+            if symtab < 0x10000 {
+                symtab = bias + ptr
+            }
+        }
+        if tag == DT_STRTAB {
+            strtab = ptr
+            if strtab < 0x10000 {
+                strtab = bias + ptr
+            }
+        }
+        if tag == DT_HASH {
+            var h: u64 = ptr
+            if h < 0x10000 {
+                h = bias + ptr
+            }
+            // SysV hash: nchain is second u32
+            nchain = __load32(cast[*void](h + 4))
+        }
+        d = d + SIZE_DYN
+    }
+
+    if symtab == 0 {
+        return null
+    }
+    if strtab == 0 {
+        return null
+    }
+
+    var max_sym: u32 = nchain
+    if max_sym == 0 {
+        max_sym = 0x8000
+    }
+
+    var i: u32 = 0
+    while i < max_sym {
+        var sym: u64 = symtab + cast[u64](i) * SIZE_SYM
+        var st_name: u32 = __load32(cast[*void](sym))
+        if st_name != 0 {
+            var s: *u8 = cast[*u8](strtab + cast[u64](st_name))
+            if s != null {
+                if *s != 0 {
+                    if hash_string(s) == func_hash {
+                        var st_info: u8 = __load8(cast[*void](sym + 4))
+                        var bind: u8 = cast[u8](st_info >> 4)
+                        var typ: u8 = cast[u8](st_info & 0xF)
+                        var ok_bind: u64 = 0
+                        if bind == STB_GLOBAL {
+                            ok_bind = 1
+                        }
+                        if bind == STB_WEAK {
+                            ok_bind = 1
+                        }
+                        var ok_type: u64 = 0
+                        if typ == STT_FUNC {
+                            ok_type = 1
+                        }
+                        if typ == STT_NOTYPE {
+                            ok_type = 1
+                        }
+                        if typ == STT_OBJECT {
+                            ok_type = 1
+                        }
+                        if ok_bind != 0 {
+                            if ok_type != 0 {
+                                var st_shndx: u16 = __load16(cast[*void](sym + 6))
+                                var st_value: u64 = __load64(cast[*void](sym + 8))
+                                if st_shndx != SHN_UNDEF {
+                                    if st_value != 0 {
+                                        return cast[PVOID](bias + st_value)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i = i + 1
+    }
+    return null
+}
+
+// ---- payload ----
+
+fn pre_main(stack_hint: PVOID) {
+    __memset(cast[*void](&g_inst), 0, sizeof(Instance))
+
+    g_inst.base_buffer = cast[PVOID](__base())
+    g_inst.base_length = __end() - __base()
+
+    // Compile-time djb2 hashes (uppercase) - same as original piclin / Stardust
+    var H_LIBC_SO_6: u32 = __hash("libc.so.6")
+    var H_LIBC_SO: u32 = __hash("libc.so")
+    var H_OPEN: u32 = __hash("open")
+    var H_WRITE: u32 = __hash("write")
+    var H_CLOSE: u32 = __hash("close")
+    var H_EXIT: u32 = __hash("exit")
+
+    var libc: PVOID = resolve_module(H_LIBC_SO_6, stack_hint)
+    if libc == null {
+        libc = resolve_module(H_LIBC_SO, stack_hint)
+    }
+    if libc == null {
+        return
+    }
+
+    g_inst.libc = libc
+    g_inst.open = resolve_symbol(libc, H_OPEN)
+    g_inst.write = resolve_symbol(libc, H_WRITE)
+    g_inst.close = resolve_symbol(libc, H_CLOSE)
+    g_inst.exit_fn = resolve_symbol(libc, H_EXIT)
+
+    if g_inst.open == null {
+        return
+    }
+    if g_inst.write == null {
+        return
+    }
+    if g_inst.close == null {
+        return
+    }
+    if g_inst.exit_fn == null {
+        return
+    }
+
+    do_main()
+}
+
+// Create test.txt with contents "success", then exit via resolved libc.
+fn do_main() {
+    // Normal string literals - compiler places them in .rdata (PIC-safe)
+    var path: *u8 = "test.txt"
+    var msg: *u8 = "success"
+    var len: u64 = 7
+
+    // open(path, O_CREAT|O_WRONLY|O_TRUNC, 0644) - SysV calling convention
+    var fd: i64 = cast[i64](__sysv_call(g_inst.open, cast[u64](path), O_FLAGS, MODE_0644))
+    if fd < 0 {
+        __sysv_call(g_inst.exit_fn, 1)
+        return
+    }
+
+    var wr: i64 = cast[i64](__sysv_call(g_inst.write, cast[u64](fd), cast[u64](msg), len))
+    if wr != cast[i64](len) {
+        __sysv_call(g_inst.close, cast[u64](fd))
+        __sysv_call(g_inst.exit_fn, 1)
+        return
+    }
+
+    __sysv_call(g_inst.close, cast[u64](fd))
+    __sysv_call(g_inst.exit_fn, 0)
+}
+
+// Entry: stack_hint is the implant frame pointer (RCX from entry stub).
+// [stack_hint+8] is the return address into the host loader.
+fn main(stack_hint: PVOID) -> u64 {
+    pre_main(stack_hint)
+    return 0
+}

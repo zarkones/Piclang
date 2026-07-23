@@ -1,0 +1,7 @@
+// Package hash - shared djb2 (ASCII uppercase) hashing for module/API names.
+package hash
+
+// String hashes a NUL-terminated C string (runtime).
+fn String(s: *u8) -> u32 {
+    return __hash(s)
+}

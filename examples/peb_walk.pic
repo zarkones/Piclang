@@ -1,0 +1,236 @@
+// peb_walk.pic - Windows x64 PEB traversal skeleton for implant development.
+//
+// Demonstrates:
+//   - structs matching PEB / LDR layouts (partial)
+//   - __readgs(0x60) to get PEB
+//   - walking InLoadOrderModuleList
+//   - normal string literals + __hash for API resolution
+//   - function-pointer calls to resolved exports
+//
+// Output is pure PIC shellcode - map RWX and jump to offset 0 on Windows.
+
+type PVOID = *void
+type ULONG = u32
+type USHORT = u16
+
+struct LIST_ENTRY {
+    Flink: *LIST_ENTRY
+    Blink: *LIST_ENTRY
+}
+
+struct UNICODE_STRING {
+    Length: USHORT
+    MaximumLength: USHORT
+    Buffer: *u16
+}
+
+// Simplified LDR_DATA_TABLE_ENTRY (InLoadOrder links at offset 0)
+struct LDR_DATA_TABLE_ENTRY {
+    InLoadOrderLinks: LIST_ENTRY
+    InMemoryOrderLinks: LIST_ENTRY
+    InInitializationOrderLinks: LIST_ENTRY
+    DllBase: PVOID
+    EntryPoint: PVOID
+    SizeOfImage: ULONG
+    _pad0: ULONG
+    FullDllName: UNICODE_STRING
+    BaseDllName: UNICODE_STRING
+}
+
+struct PEB_LDR_DATA {
+    Length: ULONG
+    Initialized: u8
+    _pad0: u8
+    _pad1: u8
+    _pad2: u8
+    SsHandle: PVOID
+    InLoadOrderModuleList: LIST_ENTRY
+}
+
+// PEB (partial - Ldr at 0x18 on x64)
+struct PEB {
+    InheritedAddressSpace: u8
+    ReadImageFileExecOptions: u8
+    BeingDebugged: u8
+    BitField: u8
+    _pad0: u32
+    Mutant: PVOID
+    ImageBaseAddress: PVOID
+    Ldr: *PEB_LDR_DATA
+}
+
+struct IMAGE_DOS_HEADER {
+    e_magic: USHORT
+    e_cblp: USHORT
+    e_cp: USHORT
+    e_crlc: USHORT
+    e_cparhdr: USHORT
+    e_minalloc: USHORT
+    e_maxalloc: USHORT
+    e_ss: USHORT
+    e_sp: USHORT
+    e_csum: USHORT
+    e_ip: USHORT
+    e_cs: USHORT
+    e_lfarlc: USHORT
+    e_ovno: USHORT
+    e_res0: USHORT
+    e_res1: USHORT
+    e_res2: USHORT
+    e_res3: USHORT
+    e_oemid: USHORT
+    e_oeminfo: USHORT
+    e_res2_0: USHORT
+    e_res2_1: USHORT
+    e_res2_2: USHORT
+    e_res2_3: USHORT
+    e_res2_4: USHORT
+    e_res2_5: USHORT
+    e_res2_6: USHORT
+    e_res2_7: USHORT
+    e_res2_8: USHORT
+    e_res2_9: USHORT
+    e_lfanew: i32
+}
+
+type FnLoadLibraryA = fn(*u8) -> PVOID
+type FnGetProcAddress = fn(PVOID, *u8) -> PVOID
+type FnMessageBoxA = fn(PVOID, *u8, *u8, ULONG) -> i32
+
+var g_kernel32: PVOID = null
+var g_ntdll: PVOID = null
+var g_LoadLibraryA: PVOID = null
+var g_GetProcAddress: PVOID = null
+
+// Hash a UTF-16LE name (Length is in bytes).
+fn hash_wstr(buf: *u16, n_bytes: u64) -> u32 {
+    var h: u32 = 5381
+    var i: u64 = 0
+    while i < n_bytes {
+        var ch: u16 = __load16(cast[*void](cast[u64](buf) + i))
+        var c: u32 = cast[u32](ch & 0xFF)
+        if c >= 0x61 {
+            if c <= 0x7A {
+                c = c - 0x20
+            }
+        }
+        h = ((h << 5) + h) + c
+        i = i + 2
+    }
+    return h
+}
+
+fn get_peb() -> *PEB {
+    return cast[*PEB](__readgs(0x60))
+}
+
+fn ldr_module(want: u32) -> PVOID {
+    var peb: *PEB = get_peb()
+    var ldr: *PEB_LDR_DATA = peb.Ldr
+    var head: *LIST_ENTRY = cast[*LIST_ENTRY](cast[u64](ldr) + 0x10)
+    var cur: *LIST_ENTRY = head.Flink
+
+    while cur != head {
+        var ent: *LDR_DATA_TABLE_ENTRY = cast[*LDR_DATA_TABLE_ENTRY](cur)
+        // BaseDllName at known offset inside LDR_DATA_TABLE_ENTRY
+        // LIST_ENTRY*3 = 48, DllBase 8, Entry 8, Size 4, pad 4, FullDllName 16 => BaseDllName @ 88
+        var name_len: u16 = __load16(cast[*void](cast[u64](ent) + 88))
+        var name_buf: *u16 = cast[*u16](__load64(cast[*void](cast[u64](ent) + 96)))
+        if name_buf != null {
+            if name_len != 0 {
+                var h: u32 = hash_wstr(name_buf, cast[u64](name_len))
+                if h == want {
+                    return ent.DllBase
+                }
+            }
+        }
+        cur = cur.Flink
+    }
+    return null
+}
+
+fn ldr_function(base: PVOID, want: u32) -> PVOID {
+    if base == null {
+        return null
+    }
+    var dos: *IMAGE_DOS_HEADER = cast[*IMAGE_DOS_HEADER](base)
+    if dos.e_magic != 0x5A4D {
+        return null
+    }
+    var nt: u64 = cast[u64](base) + cast[u64](dos.e_lfanew)
+    var opt: u64 = nt + 24
+    var magic: u16 = __load16(cast[*void](opt))
+    if magic != 0x20B {
+        return null
+    }
+    var export_rva: u32 = __load32(cast[*void](opt + 112))
+    if export_rva == 0 {
+        return null
+    }
+    var exp: u64 = cast[u64](base) + cast[u64](export_rva)
+    var nNames: u32 = __load32(cast[*void](exp + 0x18))
+    var addrFuncs: u32 = __load32(cast[*void](exp + 0x1C))
+    var addrNames: u32 = __load32(cast[*void](exp + 0x20))
+    var addrOrds: u32 = __load32(cast[*void](exp + 0x24))
+
+    var i: u32 = 0
+    while i < nNames {
+        var name_rva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrNames) + cast[u64](i) * 4))
+        var namep: *u8 = cast[*u8](cast[u64](base) + cast[u64](name_rva))
+        var h: u32 = __hash(namep)
+        if h == want {
+            var ord: u16 = __load16(cast[*void](cast[u64](base) + cast[u64](addrOrds) + cast[u64](i) * 2))
+            var fn_rva: u32 = __load32(cast[*void](cast[u64](base) + cast[u64](addrFuncs) + cast[u64](ord) * 4))
+            return cast[PVOID](cast[u64](base) + cast[u64](fn_rva))
+        }
+        i = i + 1
+    }
+    return null
+}
+
+fn main() -> u64 {
+    // Compile-time djb2 hashes (uppercase), Stardust-style
+    var H_KERNEL32: u32 = __hash("KERNEL32.DLL")
+    var H_NTDLL: u32 = __hash("NTDLL.DLL")
+    var H_LoadLibraryA: u32 = __hash("LoadLibraryA")
+    var H_GetProcAddress: u32 = __hash("GetProcAddress")
+
+    g_ntdll = ldr_module(H_NTDLL)
+    g_kernel32 = ldr_module(H_KERNEL32)
+
+    if g_kernel32 == null {
+        return 0x100
+    }
+
+    g_LoadLibraryA = ldr_function(g_kernel32, H_LoadLibraryA)
+    g_GetProcAddress = ldr_function(g_kernel32, H_GetProcAddress)
+
+    if g_LoadLibraryA == null {
+        return 0x200
+    }
+    if g_GetProcAddress == null {
+        return 0x201
+    }
+
+    // Normal strings - placed in .rdata, RIP-relative, no stack-string hacks
+    var user32_name: *u8 = "user32.dll"
+    var load: FnLoadLibraryA = cast[FnLoadLibraryA](g_LoadLibraryA)
+    var user32: PVOID = load(user32_name)
+    if user32 == null {
+        return 0x300
+    }
+
+    var msgbox_name: *u8 = "MessageBoxA"
+    var getproc: FnGetProcAddress = cast[FnGetProcAddress](g_GetProcAddress)
+    var pMsgBox: PVOID = getproc(user32, msgbox_name)
+    if pMsgBox == null {
+        return 0x301
+    }
+
+    var title: *u8 = "Piclang"
+    var body: *u8 = "PEB walk + LoadLibraryA OK"
+    var msgbox: FnMessageBoxA = cast[FnMessageBoxA](pMsgBox)
+    msgbox(null, body, title, 0)
+
+    return cast[u64](g_kernel32)
+}

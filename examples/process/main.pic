@@ -1,0 +1,99 @@
+// process - spawn shell commands, capture output (Linux harness).
+//
+//   picc examples/process/main.pic -o process.bin -rand-sections=false
+//   ./harness/run_shellcode process.bin   # returns 0
+//
+// Exercises Shell, ShellOutput, Command+argv+Output, and Remove of temp files.
+package main
+
+import "std/runtime"
+import "std/process"
+import "std/file"
+
+fn main(stack_hint: *void) -> u64 {
+    if !runtime.Init(stack_hint) {
+        return 1
+    }
+
+    // Shell: exit status
+    code, err := process.Shell("true")
+    if err != 0 {
+        return 2
+    }
+    if code != 0 {
+        return 3
+    }
+    code2, err2 := process.Shell("false")
+    if err2 != 0 {
+        return 4
+    }
+    if code2 == 0 {
+        return 5
+    }
+
+    // Capture stdout
+    out, err3 := process.ShellOutput("echo -n picproc")
+    if err3 != 0 {
+        return 6
+    }
+    if len(out) != 7 {
+        free(out)
+        return 7
+    }
+    if out[0] != 112 {
+        free(out)
+        return 8
+    }
+    free(out)
+
+    // Low-level Command + argv
+    var c: process.Cmd
+    process.Command(&c, "/bin/echo")
+    var argv: [3]*u8
+    argv[0] = "echo"
+    argv[1] = "xyz"
+    argv[2] = null
+    process.SetArgv(&c, cast[**u8](&argv[0]))
+    data, err4 := process.Output(&c)
+    if err4 != 0 {
+        return 9
+    }
+    if len(data) < 3 {
+        free(data)
+        return 10
+    }
+    free(data)
+
+    // Write a script via file package and run it
+    var path: *u8 = "/tmp/piclang_process_test.sh"
+    var werr: *u8 = file.WriteString(path, "#!/bin/sh\necho ok\n")
+    if werr != 0 {
+        return 11
+    }
+    // sh can run it as script path
+    var c2: process.Cmd
+    process.Command(&c2, "/bin/sh")
+    var argv2: [3]*u8
+    argv2[0] = "sh"
+    argv2[1] = path
+    argv2[2] = null
+    process.SetArgv(&c2, cast[**u8](&argv2[0]))
+    out2, err5 := process.Output(&c2)
+    if err5 != 0 {
+        file.Remove(path)
+        return 12
+    }
+    free(out2)
+    file.Remove(path)
+
+    // SelfTest convenience
+    st, err6 := process.SelfTest()
+    if err6 != 0 {
+        return 13
+    }
+    if st != 0 {
+        return 14
+    }
+
+    return 0
+}
