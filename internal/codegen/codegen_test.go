@@ -833,13 +833,12 @@ import "std/net"
 fn main(stackHint: *void) -> u64 {
     if !runtime.Init(stackHint) { return 1 }
     if net.Init() != 0 { return 2 }
-    var resp: net.Response
-    err := net.Get("http://127.0.0.1:%d/", &resp)
+    resp, err := net.Get("http://127.0.0.1:%d/")
     if err != 0 { return 3 }
-    if resp.status != 200 { net.FreeResponse(&resp); return 4 }
-    if resp.bodyLen != 10 { net.FreeResponse(&resp); return 5 }
-    if resp.body[0] != 104 { net.FreeResponse(&resp); return 6 }
-    net.FreeResponse(&resp)
+    if resp.status != 200 { net.FreeResponse(resp); return 4 }
+    if resp.bodyLen != 10 { net.FreeResponse(resp); return 5 }
+    if resp.body[0] != 104 { net.FreeResponse(resp); return 6 }
+    net.FreeResponse(resp)
     return 0
 }
 `, port)

@@ -1,5 +1,8 @@
 // HTTP/1.1 client over TCP (cleartext). package net.
 // https:// rejected. No map type - extra headers are **u8 "Name: value" lists.
+//
+// Fallible constructors return (value, *u8) where err == 0 means success.
+// Get/Post/Do return a heap *Response; caller FreeResponse when done.
 package net
 
 import "std/runtime"
@@ -14,6 +17,7 @@ struct Response {
     bodyLen: u64
 }
 
+// FreeResponse frees the body and the Response header from Get/Post/Do.
 fn FreeResponse(r: *Response) {
     if r == null {
         return
@@ -24,15 +28,16 @@ fn FreeResponse(r: *Response) {
     }
     r.bodyLen = 0
     r.status = 0
+    runtime.Free(cast[*void](r))
 }
 
-fn Get(url: *u8, resp: *Response) -> *u8 {
-    return Do("GET", url, cast[**u8](0), cast[*u8](0), 0, resp)
+fn Get(url: *u8) -> (*Response, *u8) {
+    return Do("GET", url, cast[**u8](0), cast[*u8](0), 0)
 }
 
-fn Post(url: *u8, contentType: *u8, body: *u8, bodyLen: u64, resp: *Response) -> *u8 {
+fn Post(url: *u8, contentType: *u8, body: *u8, bodyLen: u64) -> (*Response, *u8) {
     if contentType == null {
-        return Do("POST", url, cast[**u8](0), body, bodyLen, resp)
+        return Do("POST", url, cast[**u8](0), body, bodyLen)
     }
     // single header line allocated
     var prefix: *u8 = "Content-Type: "
@@ -41,7 +46,7 @@ fn Post(url: *u8, contentType: *u8, body: *u8, bodyLen: u64, resp: *Response) ->
     var err: *u8
     raw, err = runtime.Alloc(n + 1)
     if err != 0 {
-        return err
+        return null, err
     }
     var line: *u8 = cast[*u8](raw)
     mem.Copy(cast[*void](line), cast[*void](prefix), __strlen(prefix))
@@ -49,29 +54,25 @@ fn Post(url: *u8, contentType: *u8, body: *u8, bodyLen: u64, resp: *Response) ->
     var hdrs: [2]*u8
     hdrs[0] = line
     hdrs[1] = null
-    err = Do("POST", url, cast[**u8](&hdrs[0]), body, bodyLen, resp)
+    var resp: *Response
+    resp, err = Do("POST", url, cast[**u8](&hdrs[0]), body, bodyLen)
     runtime.Free(raw)
-    return err
+    return resp, err
 }
 
 // Do performs method url with optional headers (**u8 null-terminated "K: V") and body.
-fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Response) -> *u8 {
-    if resp == null {
-        return "net: null response"
-    }
-    resp.status = 0
-    resp.body = null
-    resp.bodyLen = 0
+// On success returns a heap *Response; caller FreeResponse.
+fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64) -> (*Response, *u8) {
     if method == null || url == null {
-        return "net: bad url"
+        return null, "net: bad url"
     }
 
     // ---- parse http://host[:port][/path] ----
     if !startsWith(url, "http://") {
         if startsWith(url, "https://") {
-            return "net: https not supported"
+            return null, "net: https not supported"
         }
-        return "net: bad url"
+        return null, "net: bad url"
     }
     var p: u64 = 7 // offset into url
     var hostOff: u64 = 7
@@ -99,7 +100,7 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
                 p = p + 1
             }
             if nd == 0 {
-                return "net: bad url"
+                return null, "net: bad url"
             }
             break
         }
@@ -110,7 +111,7 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
         p = p + 1
     }
     if hostLen == 0 {
-        return "net: bad url"
+        return null, "net: bad url"
     }
     pathOff = p
     // host C string
@@ -118,7 +119,7 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
     var err: *u8
     hostRaw, err = runtime.Alloc(hostLen + 1)
     if err != 0 {
-        return err
+        return null, err
     }
     var host: *u8 = cast[*u8](hostRaw)
     mem.Copy(cast[*void](host), cast[*void](url + hostOff), hostLen)
@@ -131,7 +132,7 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
         pr, err = runtime.Alloc(2)
         if err != 0 {
             runtime.Free(hostRaw)
-            return err
+            return null, err
         }
         path = cast[*u8](pr)
         *path = 47
@@ -142,18 +143,18 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
         pr2, err = runtime.Alloc(plen + 1)
         if err != 0 {
             runtime.Free(hostRaw)
-            return err
+            return null, err
         }
         path = cast[*u8](pr2)
         mem.Copy(cast[*void](path), cast[*void](url + pathOff), plen + 1)
     }
 
-    var c: Conn
-    c, err = Dial(host, port)
+    var conn: Conn
+    conn, err = Dial(host, port)
     if err != 0 {
         runtime.Free(hostRaw)
         runtime.Free(cast[*void](path))
-        return err
+        return null, err
     }
 
     // ---- build request ----
@@ -172,10 +173,10 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
     var reqRaw: *void
     reqRaw, err = runtime.Alloc(est)
     if err != 0 {
-        Close(c)
+        Close(conn)
         runtime.Free(hostRaw)
         runtime.Free(cast[*void](path))
-        return err
+        return null, err
     }
     var req: *u8 = cast[*u8](reqRaw)
     var di: u64 = 0
@@ -218,11 +219,11 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
     runtime.Free(hostRaw)
     runtime.Free(cast[*void](path))
 
-    err = WriteAll(c, req, di)
+    err = WriteAll(conn, req, di)
     runtime.Free(reqRaw)
     if err != 0 {
-        Close(c)
-        return err
+        Close(conn)
+        return null, err
     }
 
     // ---- read response ----
@@ -230,8 +231,8 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
     var accRaw: *void
     accRaw, err = runtime.Alloc(capn)
     if err != 0 {
-        Close(c)
-        return err
+        Close(conn)
+        return null, err
     }
     var acc: *u8 = cast[*u8](accRaw)
     var total: u64 = 0
@@ -240,15 +241,15 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
             var ncap: u64 = capn * 2
             if ncap > HTTP_MAX_BODY + HTTP_MAX_HDR {
                 runtime.Free(accRaw)
-                Close(c)
-                return "net: response too large"
+                Close(conn)
+                return null, "net: response too large"
             }
             var nr: *void
             nr, err = runtime.Alloc(ncap)
             if err != 0 {
                 runtime.Free(accRaw)
-                Close(c)
-                return err
+                Close(conn)
+                return null, err
             }
             mem.Copy(nr, cast[*void](acc), total)
             runtime.Free(accRaw)
@@ -257,18 +258,18 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
             capn = ncap
         }
         var got: u64
-        got, err = Read(c, acc + total, capn - total)
+        got, err = Read(conn, acc + total, capn - total)
         if err != 0 {
             runtime.Free(accRaw)
-            Close(c)
-            return err
+            Close(conn)
+            return null, err
         }
         if got == 0 {
             break
         }
         total = total + got
     }
-    Close(c)
+    Close(conn)
 
     // ---- parse ----
     var hdrEnd: u64 = total
@@ -300,44 +301,56 @@ fn Do(method: *u8, url: *u8, headers: **u8, body: *u8, bodyLen: u64, resp: *Resp
         }
         sp = sp + 1
     }
-    resp.status = status
     var bodyOff: u64 = hdrEnd
     if hdrEnd + 4 <= total {
         bodyOff = hdrEnd + 4
     }
-    var bodyLen: u64 = 0
+    var blen: u64 = 0
     if bodyOff < total {
-        bodyLen = total - bodyOff
+        blen = total - bodyOff
     }
     // Content-Length may shrink
     var cl: i64 = scanCl(acc, hdrEnd)
     if cl >= 0 {
-        if cast[u64](cl) < bodyLen {
-            bodyLen = cast[u64](cl)
+        if cast[u64](cl) < blen {
+            blen = cast[u64](cl)
         }
     }
-    if bodyLen > HTTP_MAX_BODY {
+    if blen > HTTP_MAX_BODY {
         runtime.Free(accRaw)
-        return "net: response too large"
+        return null, "net: response too large"
     }
-    if bodyLen == 0 {
+
+    var bodyPtr: *u8 = null
+    if blen == 0 {
         runtime.Free(accRaw)
-        resp.body = null
-        resp.bodyLen = 0
-        return 0
+    } else {
+        var br: *void
+        br, err = runtime.Alloc(blen + 1)
+        if err != 0 {
+            runtime.Free(accRaw)
+            return null, err
+        }
+        mem.Copy(br, cast[*void](acc + bodyOff), blen)
+        *cast[*u8](cast[u64](br) + blen) = 0
+        runtime.Free(accRaw)
+        bodyPtr = cast[*u8](br)
     }
-    var br: *void
-    br, err = runtime.Alloc(bodyLen + 1)
+
+    var rr: *void
+    rr, err = runtime.Alloc(sizeof(Response))
     if err != 0 {
-        runtime.Free(accRaw)
-        return err
+        if bodyPtr != null {
+            runtime.Free(cast[*void](bodyPtr))
+        }
+        return null, err
     }
-    mem.Copy(br, cast[*void](acc + bodyOff), bodyLen)
-    *cast[*u8](cast[u64](br) + bodyLen) = 0
-    runtime.Free(accRaw)
-    resp.body = cast[*u8](br)
-    resp.bodyLen = bodyLen
-    return 0
+    mem.Set(rr, 0, sizeof(Response))
+    var resp: *Response = cast[*Response](rr)
+    resp.status = status
+    resp.body = bodyPtr
+    resp.bodyLen = blen
+    return resp, 0
 }
 
 fn startsWith(s: *u8, pref: *u8) -> bool {

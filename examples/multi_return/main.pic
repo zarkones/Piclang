@@ -3,7 +3,9 @@
 //   picc examples/multiReturn/main.pic -o multi.bin -rand-sections=false
 //   ./harness/runShellcode multi.bin   # returns 0
 //
-// Convention: fallible APIs return (value, *u8) where err == 0 means success.
+// Convention: fallible APIs that produce a value return (value, *u8) where
+// err == 0 means success. Prefer multi-return over out-params (e.g. net.Get
+// returns (*Response, *u8), not Get(url, *Response) -> *u8).
 // Multi-return packs up to 4 ABI cells into RAX, RDX, R8, R9.
 package main
 

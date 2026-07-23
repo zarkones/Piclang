@@ -31,13 +31,12 @@ fn main(stackHint: *void) -> u64 {
     var url: *u8 = "http://duckduckgo.com/"
     var outPath: *u8 = "piclang_duckduckgo.html"
 
-    var resp: net.Response
-    err := net.Get(url, &resp)
+    resp, err := net.Get(url)
     if err != 0 {
         return 3
     }
-    defer net.FreeResponse(&resp)
-    
+    defer net.FreeResponse(resp)
+
     if resp.body == null {
         return 4
     }
